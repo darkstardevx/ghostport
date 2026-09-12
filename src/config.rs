@@ -70,6 +70,28 @@ impl Config {
         toml::from_str(&text).map_err(|e| format!("failed to parse {}: {e}", path.display()))
     }
 
+    /// Used by the TUI's link editor: writes only if this config passes
+    /// `validate()` first — never save something the daemon would refuse
+    /// to start with. Returns the validation errors instead of writing
+    /// when invalid, same "full list, not just the first" shape as
+    /// `validate()` itself.
+    pub fn save(&self, path: &std::path::Path) -> Result<(), Vec<String>> {
+        let errors = self.validate();
+        if !errors.is_empty() {
+            return Err(errors);
+        }
+        let text = toml::to_string_pretty(self).map_err(|e| vec![e.to_string()])?;
+        std::fs::write(path, text).map_err(|e| vec![format!("failed to write {}: {e}", path.display())])
+    }
+
+    /// Whether a link of `mode` needs `listen` (vs `target`) on *this*
+    /// side, given `self.role` — the same rule `validate_link` enforces,
+    /// exposed for the TUI's link editor to know which field to prompt
+    /// for and how to label it.
+    pub fn link_needs_listen(&self, mode: LinkMode) -> bool {
+        matches!((self.role, mode), (Role::Client, LinkMode::Forward) | (Role::Server, LinkMode::Reverse))
+    }
+
     /// All problems found, not just the first — a config editor (or a
     /// human squinting at error output) wants the full list in one pass,
     /// not a fix-one-rerun-find-the-next loop.
@@ -111,7 +133,7 @@ impl Config {
     /// module doc table in README for the full (role, mode) -> field
     /// matrix; this mirrors it directly.
     fn validate_link(&self, link: &LinkConfig, errors: &mut Vec<String>) {
-        let needs_listen = matches!((self.role, link.mode), (Role::Client, LinkMode::Forward) | (Role::Server, LinkMode::Reverse));
+        let needs_listen = self.link_needs_listen(link.mode);
         let (required_field, forbidden_field, required_value, forbidden_value) =
             if needs_listen { ("listen", "target", &link.listen, &link.target) } else { ("target", "listen", &link.target, &link.listen) };
 
@@ -272,5 +294,43 @@ mod tests {
         let parsed: Config = toml::from_str(&text).unwrap();
         assert_eq!(parsed.links.len(), 1);
         assert_eq!(parsed.links[0].id, "db");
+    }
+
+    fn scratch_toml_path(name: &str) -> std::path::PathBuf {
+        std::env::temp_dir().join(format!("ghostport-config-test-{name}-{}.toml", std::process::id()))
+    }
+
+    #[test]
+    fn save_writes_a_valid_config_and_it_reloads_identically() {
+        let path = scratch_toml_path("save-valid");
+        let mut cfg = base_server();
+        cfg.links.push(LinkConfig { id: "db".to_string(), mode: LinkMode::Forward, listen: None, target: Some("127.0.0.1:5432".to_string()) });
+
+        cfg.save(&path).unwrap();
+        let reloaded = Config::load(&path).unwrap();
+        assert_eq!(reloaded.links.len(), 1);
+        assert_eq!(reloaded.links[0].id, "db");
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn save_refuses_to_write_an_invalid_config() {
+        let path = scratch_toml_path("save-invalid");
+        let mut cfg = base_server();
+        cfg.listen_data = None; // now invalid
+
+        let result = cfg.save(&path);
+        assert!(result.is_err());
+        assert!(!path.exists(), "an invalid config must never be written to disk");
+    }
+
+    #[test]
+    fn link_needs_listen_matches_the_role_mode_matrix() {
+        let client = base_client();
+        let server = base_server();
+        assert!(client.link_needs_listen(LinkMode::Forward)); // client + forward -> listen
+        assert!(!client.link_needs_listen(LinkMode::Reverse)); // client + reverse -> target
+        assert!(!server.link_needs_listen(LinkMode::Forward)); // server + forward -> target
+        assert!(server.link_needs_listen(LinkMode::Reverse)); // server + reverse -> listen
     }
 }

@@ -1,11 +1,14 @@
 mod client;
 mod config;
 mod framing;
+mod ipc;
 mod keys;
 mod noise;
 mod protocol;
 mod relay;
 mod server;
+mod stats;
+mod tui;
 
 use clap::{Parser, Subcommand};
 use config::{Config, Role};
@@ -34,6 +37,25 @@ enum Commands {
     Check { config: PathBuf },
     /// Start the daemon (server or client role, per the config file).
     Run { config: PathBuf },
+    /// Query a running daemon's live status over its Unix socket.
+    Status {
+        /// Path to the status socket. Defaults to
+        /// ~/.local/state/ghostport/ghostport.sock.
+        #[arg(long)]
+        socket: Option<PathBuf>,
+        /// Re-query and reprint every second instead of once.
+        #[arg(long)]
+        watch: bool,
+        /// Print the raw JSON snapshot instead of a formatted table.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Interactive TUI: live status, link editing, service control.
+    Tui {
+        config: PathBuf,
+        #[arg(long)]
+        socket: Option<PathBuf>,
+    },
 }
 
 fn expand_tilde(path: &str) -> PathBuf {
@@ -101,6 +123,56 @@ fn run_check(config_path: &PathBuf) -> ExitCode {
     }
 }
 
+async fn run_status(socket: PathBuf, watch: bool, json: bool) -> ExitCode {
+    loop {
+        match ipc::query_status(&socket).await {
+            Ok(snapshot) => {
+                if json {
+                    println!("{}", serde_json::to_string_pretty(&snapshot).unwrap_or_default());
+                } else {
+                    if watch {
+                        print!("\x1b[2J\x1b[H"); // clear screen, home cursor — plain redraw, no ratatui needed for a one-shot/poll view
+                    }
+                    print_status(&snapshot);
+                }
+            }
+            Err(e) => {
+                eprintln!("ghostport: {e}");
+                if !watch {
+                    return ExitCode::FAILURE;
+                }
+            }
+        }
+        if !watch {
+            return ExitCode::SUCCESS;
+        }
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+    }
+}
+
+fn print_status(snapshot: &stats::StatusSnapshot) {
+    let green = cybercore::palette::acid_green();
+    let red = cybercore::palette::red();
+    let cyan = cybercore::palette::cyan();
+    let r = cybercore::palette::RESET;
+
+    let control = if snapshot.control_connected { format!("{green}connected{r}") } else { format!("{red}disconnected{r}") };
+    println!("role: {}   uptime: {}s   control channel: {control}", snapshot.role, snapshot.uptime_secs);
+    if snapshot.control_connected {
+        if let (Some(addr), Some(since)) = (&snapshot.control_peer_addr, snapshot.control_connected_since_secs_ago) {
+            println!("  peer: {addr}  (connected {since}s ago)");
+        }
+    }
+    println!();
+    println!("{cyan}{:<14} {:<9} {:>7} {:>7} {:>12} {:>12}{r}", "link", "mode", "active", "total", "bytes-fwd", "bytes-back");
+    if snapshot.links.is_empty() {
+        println!("(no links configured)");
+    }
+    for link in &snapshot.links {
+        println!("{:<14} {:<9} {:>7} {:>7} {:>12} {:>12}", link.id, link.mode, link.active_streams, link.total_streams, link.bytes_forward, link.bytes_back);
+    }
+}
+
 async fn run_daemon(config_path: &PathBuf) -> ExitCode {
     let cfg = match Config::load(config_path) {
         Ok(c) => c,
@@ -135,13 +207,14 @@ async fn run_daemon(config_path: &PathBuf) -> ExitCode {
     };
 
     let role = cfg.role;
+    let state = Arc::new(stats::SharedState::new(&cfg));
     let config = Arc::new(cfg);
     let private_key = Arc::new(private_key);
     let peer_public_key = Arc::new(peer_public_key);
 
     let result = match role {
-        Role::Server => server::run(server::Context { config, private_key, peer_public_key }).await,
-        Role::Client => client::run(client::Context { config, private_key, peer_public_key }).await,
+        Role::Server => server::run(server::Context { config, private_key, peer_public_key, state }).await,
+        Role::Client => client::run(client::Context { config, private_key, peer_public_key, state }).await,
     };
 
     match result {
@@ -166,6 +239,15 @@ fn main() -> ExitCode {
             banner();
             let runtime = tokio::runtime::Runtime::new().expect("failed to start tokio runtime");
             runtime.block_on(run_daemon(&config))
+        }
+        Commands::Status { socket, watch, json } => {
+            let socket = socket.unwrap_or_else(ipc::default_socket_path);
+            let runtime = tokio::runtime::Runtime::new().expect("failed to start tokio runtime");
+            runtime.block_on(run_status(socket, watch, json))
+        }
+        Commands::Tui { config, socket } => {
+            let socket = socket.unwrap_or_else(ipc::default_socket_path);
+            tui::run(config, socket)
         }
     }
 }
@@ -279,21 +361,34 @@ mod integration_tests {
         };
         assert!(client_config.validate().is_empty(), "{:?}", client_config.validate());
 
+        let server_state = Arc::new(stats::SharedState::new(&server_config));
+        let client_state = Arc::new(stats::SharedState::new(&client_config));
+        let server_config = Arc::new(server_config);
+        let client_config = Arc::new(client_config);
+
         tokio::spawn(server::run(server::Context {
-            config: Arc::new(server_config),
+            config: server_config.clone(),
             private_key: Arc::new(server_kp.private),
             peer_public_key: Arc::new(client_kp.public.clone()),
+            state: server_state.clone(),
         }));
         tokio::spawn(client::run(client::Context {
-            config: Arc::new(client_config),
+            config: client_config.clone(),
             private_key: Arc::new(client_kp.private),
             peer_public_key: Arc::new(server_kp.public.clone()),
+            state: client_state.clone(),
         }));
 
         // Forward: hit the client's local port, expect it to have gone
         // client -> tunnel -> server -> forward_target and back.
         let echoed = round_trip(&format!("127.0.0.1:{forward_local_port}"), b"hello-forward").await;
         assert_eq!(echoed, b"hello-forward");
+
+        // Stats should reflect that round trip: the "fwd" link on both
+        // sides saw exactly one stream, with real bytes moved.
+        assert_eq!(server_state.links["fwd"].total_streams.load(std::sync::atomic::Ordering::Relaxed), 1);
+        assert!(server_state.links["fwd"].bytes_forward.load(std::sync::atomic::Ordering::Relaxed) > 0);
+        assert_eq!(client_state.links["fwd"].total_streams.load(std::sync::atomic::Ordering::Relaxed), 1);
 
         // Reverse: hit the server's external port, expect it to have
         // gone server -> (control signal) -> client -> reverse_target
@@ -322,10 +417,12 @@ mod integration_tests {
             server_data_addr: None,
             links: vec![],
         };
+        let state = Arc::new(stats::SharedState::new(&server_config));
         tokio::spawn(server::run(server::Context {
             config: Arc::new(server_config),
             private_key: Arc::new(server_kp.private),
             peer_public_key: Arc::new(client_kp.public.clone()),
+            state,
         }));
 
         // Client pinned to the impostor's public key, not the real

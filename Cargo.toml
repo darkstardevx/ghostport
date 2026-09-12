@@ -15,3 +15,5 @@ snowstorm = "0.4"
 rand = "0.8"
 base64 = "0.22"
 cybercore = { path = "/home/raven/.sysops/cybercore" }
+ratatui = "0.30.2"
+crossterm = "0.29.0"

@@ -10,7 +10,8 @@
 
 use crate::config::{Config, LinkMode};
 use crate::protocol::{ControlMessage, StreamHello};
-use crate::{framing, noise, relay};
+use crate::stats::SharedState;
+use crate::{framing, ipc, noise, relay};
 use snowstorm::NoiseStream;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -31,6 +32,7 @@ pub struct Context {
     pub config: Arc<Config>,
     pub private_key: Arc<Vec<u8>>,
     pub peer_public_key: Arc<Vec<u8>>,
+    pub state: Arc<SharedState>,
 }
 
 pub async fn run(ctx: Context) -> std::io::Result<()> {
@@ -48,6 +50,8 @@ pub async fn run(ctx: Context) -> std::io::Result<()> {
         }
     }
 
+    let ipc_task = tokio::spawn(ipc::run_ipc_server(ctx.state.clone(), ctx.config.clone(), ipc::default_socket_path()));
+
     let ctx_data = Arc::new(ctx);
     let ctx_control = ctx_data.clone();
     let pending_data = pending.clone();
@@ -55,7 +59,7 @@ pub async fn run(ctx: Context) -> std::io::Result<()> {
     let control_task = tokio::spawn(async move { run_control_accept_loop(ctx_control, listen_control, open_stream_rx).await });
     let data_task = tokio::spawn(async move { run_data_accept_loop(ctx_data, listen_data, pending_data).await });
 
-    let _ = tokio::join!(control_task, data_task);
+    let _ = tokio::join!(control_task, data_task, ipc_task);
     Ok(())
 }
 
@@ -133,9 +137,11 @@ async fn run_control_accept_loop(ctx: Arc<Context>, listen_addr: String, mut ope
             }
         };
         println!("ghostport: control channel connected from {peer_addr}");
+        ctx.state.control.set_connected(peer_addr.to_string());
 
         let (mut read_half, mut write_half) = tokio::io::split(noise_stream);
         run_control_session(&mut read_half, &mut write_half, &mut open_stream_rx).await;
+        ctx.state.control.set_disconnected();
         println!("ghostport: control channel disconnected from {peer_addr}, awaiting reconnect");
     }
 }
@@ -204,18 +210,20 @@ async fn handle_data_connection(ctx: Arc<Context>, tcp: TcpStream, pending: Pend
         return Err(std::io::Error::other(format!("unknown link id \"{}\"", hello.link_id)));
     };
 
+    let stats = ctx.state.links.get(&link.id).expect("state's link map is built from this same config");
+
     match (link.mode, hello.stream_id) {
         (LinkMode::Forward, None) => {
             let target = link.target.clone().expect("validated: forward link on server has target");
             let target_conn = TcpStream::connect(&target).await?;
-            relay::relay(&link.id, tunnel, target_conn).await;
+            relay::relay(&link.id, stats, tunnel, target_conn).await;
             Ok(())
         }
         (LinkMode::Reverse, Some(stream_id)) => {
             let Some(external_conn) = pending.lock().await.remove(&stream_id) else {
                 return Err(std::io::Error::other(format!("stream {stream_id} for link \"{}\" is unknown or already timed out", link.id)));
             };
-            relay::relay(&link.id, tunnel, external_conn).await;
+            relay::relay(&link.id, stats, tunnel, external_conn).await;
             Ok(())
         }
         _ => Err(std::io::Error::other(format!("link \"{}\" mode/stream_id mismatch (protocol error)", link.id))),

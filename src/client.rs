@@ -7,7 +7,8 @@
 
 use crate::config::{Config, LinkMode};
 use crate::protocol::{ControlMessage, StreamHello};
-use crate::{framing, noise, relay};
+use crate::stats::SharedState;
+use crate::{framing, ipc, noise, relay};
 use snowstorm::NoiseStream;
 use std::sync::Arc;
 use std::time::Duration;
@@ -17,10 +18,13 @@ pub struct Context {
     pub config: Arc<Config>,
     pub private_key: Arc<Vec<u8>>,
     pub peer_public_key: Arc<Vec<u8>>,
+    pub state: Arc<SharedState>,
 }
 
 pub async fn run(ctx: Context) -> std::io::Result<()> {
     let ctx = Arc::new(ctx);
+
+    tokio::spawn(ipc::run_ipc_server(ctx.state.clone(), ctx.config.clone(), ipc::default_socket_path()));
 
     for link in &ctx.config.links {
         if link.mode == LinkMode::Forward {
@@ -72,7 +76,8 @@ async fn dial_data_tunnel_and_relay(ctx: &Context, link_id: &str, stream_id: Opt
     let handshake = noise::initiator(&ctx.private_key, &ctx.peer_public_key).map_err(std::io::Error::other)?;
     let mut tunnel = NoiseStream::handshake(tcp, handshake).await.map_err(std::io::Error::other)?;
     framing::send_json(&mut tunnel, &StreamHello { link_id: link_id.to_string(), stream_id }).await?;
-    relay::relay(link_id, tunnel, local_conn).await;
+    let stats = ctx.state.links.get(link_id).expect("state's link map is built from this same config");
+    relay::relay(link_id, stats, tunnel, local_conn).await;
     Ok(())
 }
 
@@ -94,8 +99,10 @@ async fn run_control_loop(ctx: Arc<Context>) {
         match connect_control(&ctx, &server_control_addr).await {
             Ok(mut noise_stream) => {
                 println!("ghostport: control channel connected to {server_control_addr}");
+                ctx.state.control.set_connected(server_control_addr.clone());
                 backoff = Duration::from_secs(1);
                 run_control_session(&ctx, &mut noise_stream).await;
+                ctx.state.control.set_disconnected();
                 println!("ghostport: control channel disconnected, reconnecting...");
             }
             Err(e) => {
