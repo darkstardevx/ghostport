@@ -1,0 +1,18 @@
+[Unit]
+Description=GhostPort — encrypted, NAT-traversing port forwarder
+Documentation=https://github.com/darkstardevx/ghostport
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=raven
+Group=raven
+WorkingDirectory=/home/raven/tools/daemons/ghostport
+ExecStart=/home/raven/.cargo-target/release/ghostport run /home/raven/.config/ghostport/config.toml
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=10
+
+[Install]
+WantedBy=multi-user.target

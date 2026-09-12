@@ -1,0 +1,22 @@
+//! Bidirectional byte relay between an encrypted tunnel stream and a
+//! plaintext local connection (the accepted local app, or the dialed
+//! real destination). `tokio::io::copy_bidirectional` does the actual
+//! work — `NoiseStream` already implements `AsyncRead + AsyncWrite`, so
+//! there's nothing tunnel-specific to hand-roll here.
+
+use tokio::io::{AsyncRead, AsyncWrite};
+
+pub async fn relay<A, B>(link_id: &str, mut a: A, mut b: B)
+where
+    A: AsyncRead + AsyncWrite + Unpin,
+    B: AsyncRead + AsyncWrite + Unpin,
+{
+    match tokio::io::copy_bidirectional(&mut a, &mut b).await {
+        Ok((a_to_b, b_to_a)) => {
+            println!("ghostport: [{link_id}] stream closed ({a_to_b} bytes forward, {b_to_a} bytes back)");
+        }
+        Err(e) => {
+            eprintln!("ghostport: [{link_id}] stream ended with an error: {e}");
+        }
+    }
+}
