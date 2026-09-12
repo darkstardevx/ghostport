@@ -136,53 +136,82 @@ sufficient.
 
 `ghostport tui <config>` — three tabs (`Tab`/`1`/`2`/`3` to switch):
 
-- **Status** — the same live data as `ghostport status`, auto-refreshing.
-- **Links** — add (`a`), remove (`d`, with a confirm), and browse
-  configured links. Adding one is a guided 3-step wizard: id → direction
-  (`f`/`r`, with an inline one-line explanation of what forward/reverse
-  actually do — not just "press f or r") → address, with **live
-  validation** as you type it (a green ✓ or a red "needs host:port"
-  right in the input line, before you even press enter). Every add/remove
-  is held in memory until you save (`s`), which runs the same
-  `Config::validate()` the daemon itself uses before writing anything —
-  an invalid edit is refused with the specific reasons, never silently
-  written. **No live reload**: saving prepares the config for the
-  *daemon's next start*, it doesn't affect an already-running instance —
-  the natural workflow is edit → save → restart (Service tab).
-- **Service** — `s`/`x`/`r` to start/stop/restart the systemd service.
-  Each suspends the TUI (leaves the alternate screen, disables raw mode),
-  runs `sudo systemctl <action> ghostport` inheriting this process's
-  stdio so the password prompt appears exactly as if typed directly —
-  same convention as WraithFlow's `--admin` flags — then restores the
-  TUI. Checking current state (`systemctl is-active`) needs no sudo,
-  same reasoning as WraithFlow's `--admin --status`.
+- **Status** — the same live data as `ghostport status`, auto-refreshing
+  (`r` to force a refresh). Enriched beyond the raw CLI view: uptime and
+  the control-channel's connected-since duration are human-formatted
+  (`1h 4m 12s`, not raw seconds), byte counters are human-formatted too
+  (`4.2 MB`, not a raw integer), each link shows a **live throughput
+  estimate** (computed client-side from two consecutive snapshots — no
+  daemon changes needed for this), and a `TOTAL` row sums every column
+  across all links.
+- **Links** — browse, add (`a`), **fully edit** (`e`), remove (`d`, with
+  a confirm). Adding opens a **template chooser** first — a real
+  selectable dropdown (`j`/`k`, `enter`), not single-letter keys: SSH,
+  HTTP, HTTPS, PostgreSQL, MySQL/MariaDB, Redis, or exposing a local
+  dev/web server, each with a sensible default id and port, or "Custom"
+  for full manual entry. Picking a template pre-fills the id and jumps
+  straight to confirming the address (the mode is implied by the
+  template) — accept the suggested `127.0.0.1:<port>` as-is or edit it.
+  Editing (`e`) reuses the exact same id → direction → address wizard,
+  just pre-filled with the link's current values — changing the id
+  renames it in place rather than creating a duplicate. Every
+  add/edit/remove is held in memory until you save (`s`), which runs the
+  same `Config::validate()` the daemon itself uses before writing
+  anything — an invalid edit is refused with the specific reasons, never
+  silently written. **No live reload**: saving prepares the config for
+  the *daemon's next start* — the natural workflow is edit → save →
+  restart (Service tab).
+- **Service** — a real selectable menu (`j`/`k`, `enter`), not a wall of
+  single-letter keys: Start, Stop, Restart, Enable at boot, Disable at
+  boot, Install systemd unit, View recent logs. Everything except
+  viewing logs asks for confirmation first, then suspends the TUI
+  (leaves the alternate screen, disables raw mode), runs
+  `sudo systemctl <action> ghostport` inheriting this process's stdio so
+  the password prompt appears exactly as if typed directly — same
+  convention as WraithFlow's `--admin` flags — then restores the TUI.
+  "Install systemd unit" writes the *actual* `systemd/ghostport.service`
+  content (embedded into the binary at compile time via `include_str!`,
+  so it works regardless of where the binary ends up) to
+  `/etc/systemd/system/` via `sudo tee`, then `systemctl daemon-reload` —
+  no more manually copying the template first. "View recent logs" runs
+  `journalctl -u ghostport -n 50 --no-pager` — deliberately no sudo, same
+  "read-only status needs no privilege" reasoning as `is-active`/
+  `is-enabled` (both shown at the top of the tab, refreshed live).
 
 Colors come from the active `cybercore` theme throughout, not just a
 couple of accents — forward/reverse links get distinct colors (cyan /
 hot pink) everywhere they're shown, key hints are colored per-letter
 against muted labels, an active stream count lights up green the moment
-it's actually carrying traffic, and byte counters get their own accent
-color. The plain CLI (`keygen`, `check`, `status`) is colored the same
-way via a small shared `theme.rs` helper — green for success, red for
-problems, cyan for paths/labels — and the daemon's own connection logs
-(`server.rs`/`client.rs`/`relay.rs`) pick up the same treatment when run
-in a real terminal.
+it's actually carrying traffic, byte counters get their own accent
+color, and each Service menu entry is colored by what it actually does
+(green for Start/Enable, red for Stop/Disable, orange for Restart,
+purple for Install, cyan for View logs). The plain CLI (`keygen`,
+`check`, `status`) is colored the same way via a small shared `theme.rs`
+helper — green for success, red for problems, cyan for paths/labels —
+and the daemon's own connection logs (`server.rs`/`client.rs`/
+`relay.rs`) pick up the same treatment when run in a real terminal.
 
 ## ✅ Verification
 
-40 tests. Per-module unit tests: config validation (every (role, mode)
+50 tests. Per-module unit tests: config validation (every (role, mode)
 ⇄ required-field combination, duplicate ids, bad addresses, TOML
 round-trip, `save()` refusing an invalid config and never touching disk
 when it does), key generation/save/load/permissions, the JSON framing
 layer, Noise handshake construction, live-stats counters (zeroed at
 start, correctly reflecting updates, control connect/disconnect), the
 IPC socket (round-trips a real snapshot over a real Unix socket, correct
-`0600` permissions, fails cleanly when nothing's listening), and the
-TUI's link-editing logic (produces correctly-shaped links per the
-role/mode matrix, replaces on duplicate id, save clears the dirty flag
-and the reloaded file matches, remove marks dirty, an invalid address
-is rejected without losing wizard progress, and the live validation
-indicator reflects what's actually typed).
+`0600` permissions, fails cleanly when nothing's listening), duration/
+byte/rate formatting (every scale — seconds through days, bytes through
+terabytes), and the TUI's link-editing logic: produces correctly-shaped
+links per the role/mode matrix, replaces on duplicate id, save clears
+the dirty flag and the reloaded file matches, remove marks dirty, an
+invalid address is rejected without losing wizard progress, the live
+validation indicator reflects what's actually typed, a template
+pre-fills its id and skips straight to the address step, editing
+pre-fills current values and updates in place, renaming during an edit
+removes the old entry rather than duplicating, the service menu wraps
+navigation correctly, viewing logs skips the confirm prompt while every
+other action requires it.
 
 Two full **end-to-end integration tests** against real running daemon
 instances — not mocked at any layer: real loopback TCP sockets, real
@@ -211,7 +240,9 @@ src/framing.rs   length-prefixed JSON over any AsyncRead/AsyncWrite
 src/relay.rs     bidirectional byte relay (tokio::io::copy_bidirectional), updates stats
 src/server.rs    server role: accepts control + data connections, reverse-mode listeners
 src/client.rs    client role: control-channel reconnect loop, forward-mode listeners
-src/tui/         management console (ratatui): app.rs (state), ui.rs (rendering), mod.rs (event loop, systemctl)
+src/tui/         management console (ratatui): app.rs (state), ui.rs (rendering),
+                 mod.rs (event loop, systemctl/journalctl, embedded unit file),
+                 templates.rs (link templates), format.rs (duration/bytes/rate)
 src/main.rs      CLI (keygen/check/run/status/tui) + integration tests
 ```
 
