@@ -11,9 +11,10 @@
 use crate::config::{Config, LinkMode};
 use crate::protocol::{ControlMessage, StreamHello};
 use crate::stats::SharedState;
-use crate::{framing, ipc, noise, relay};
+use crate::{framing, ipc, noise, relay, theme};
 use snowstorm::NoiseStream;
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
@@ -33,6 +34,11 @@ pub struct Context {
     pub private_key: Arc<Vec<u8>>,
     pub peer_public_key: Arc<Vec<u8>>,
     pub state: Arc<SharedState>,
+    /// Where this instance's status IPC socket lives. Not always the
+    /// default — running both roles on one machine (e.g. a local demo)
+    /// needs two distinct paths, since two daemons can't share one
+    /// socket file.
+    pub socket_path: PathBuf,
 }
 
 pub async fn run(ctx: Context) -> std::io::Result<()> {
@@ -50,7 +56,7 @@ pub async fn run(ctx: Context) -> std::io::Result<()> {
         }
     }
 
-    let ipc_task = tokio::spawn(ipc::run_ipc_server(ctx.state.clone(), ctx.config.clone(), ipc::default_socket_path()));
+    let ipc_task = tokio::spawn(ipc::run_ipc_server(ctx.state.clone(), ctx.config.clone(), ctx.socket_path.clone()));
 
     let ctx_data = Arc::new(ctx);
     let ctx_control = ctx_data.clone();
@@ -67,17 +73,17 @@ async fn spawn_reverse_listener(link_id: String, listen_addr: String, pending: P
     let listener = match TcpListener::bind(&listen_addr).await {
         Ok(l) => l,
         Err(e) => {
-            eprintln!("ghostport: [{link_id}] failed to bind {listen_addr}: {e}");
+            eprintln!("ghostport: [{}] {}", theme::accent(&link_id), theme::err(&format!("failed to bind {listen_addr}: {e}")));
             return;
         }
     };
-    println!("ghostport: [{link_id}] listening on {listen_addr} (reverse)");
+    println!("ghostport: [{}] {}", theme::accent(&link_id), theme::ok(&format!("listening on {listen_addr} (reverse)")));
 
     loop {
         let (external_conn, peer_addr) = match listener.accept().await {
             Ok(v) => v,
             Err(e) => {
-                eprintln!("ghostport: [{link_id}] accept failed: {e}");
+                eprintln!("ghostport: [{}] {}", theme::accent(&link_id), theme::err(&format!("accept failed: {e}")));
                 continue;
             }
         };
@@ -88,7 +94,7 @@ async fn spawn_reverse_listener(link_id: String, listen_addr: String, pending: P
             // No control session has ever connected (channel closed only
             // if the accept loop itself is gone) — nothing to do but drop.
             pending.lock().await.remove(&stream_id);
-            eprintln!("ghostport: [{link_id}] {peer_addr}: control channel unavailable, dropping");
+            eprintln!("ghostport: [{}] {}", theme::accent(&link_id), theme::warn(&format!("{peer_addr}: control channel unavailable, dropping")));
             continue;
         }
 
@@ -97,7 +103,7 @@ async fn spawn_reverse_listener(link_id: String, listen_addr: String, pending: P
         tokio::spawn(async move {
             tokio::time::sleep(Duration::from_secs(10)).await;
             if pending_cleanup.lock().await.remove(&stream_id).is_some() {
-                eprintln!("ghostport: [{link_id_cleanup}] stream {stream_id} timed out waiting for the client to respond (offline?)");
+                eprintln!("ghostport: [{}] {}", theme::accent(&link_id_cleanup), theme::warn(&format!("stream {stream_id} timed out waiting for the client to respond (offline?)")));
             }
         });
     }
@@ -107,17 +113,17 @@ async fn run_control_accept_loop(ctx: Arc<Context>, listen_addr: String, mut ope
     let listener = match TcpListener::bind(&listen_addr).await {
         Ok(l) => l,
         Err(e) => {
-            eprintln!("ghostport: fatal: failed to bind control listener {listen_addr}: {e}");
+            eprintln!("ghostport: {}", theme::err(&format!("fatal: failed to bind control listener {listen_addr}: {e}")));
             return;
         }
     };
-    println!("ghostport: control channel listening on {listen_addr}");
+    println!("ghostport: {}", theme::ok(&format!("control channel listening on {listen_addr}")));
 
     loop {
         let (tcp, peer_addr) = match listener.accept().await {
             Ok(v) => v,
             Err(e) => {
-                eprintln!("ghostport: control accept failed: {e}");
+                eprintln!("ghostport: {}", theme::err(&format!("control accept failed: {e}")));
                 continue;
             }
         };
@@ -125,24 +131,24 @@ async fn run_control_accept_loop(ctx: Arc<Context>, listen_addr: String, mut ope
         let handshake = match noise::responder(&ctx.private_key, &ctx.peer_public_key) {
             Ok(h) => h,
             Err(e) => {
-                eprintln!("ghostport: control: failed to build handshake state: {e}");
+                eprintln!("ghostport: {}", theme::err(&format!("control: failed to build handshake state: {e}")));
                 continue;
             }
         };
         let noise_stream = match NoiseStream::handshake(tcp, handshake).await {
             Ok(s) => s,
             Err(e) => {
-                eprintln!("ghostport: control: handshake with {peer_addr} failed (wrong key?): {e}");
+                eprintln!("ghostport: {}", theme::err(&format!("control: handshake with {peer_addr} failed (wrong key?): {e}")));
                 continue;
             }
         };
-        println!("ghostport: control channel connected from {peer_addr}");
+        println!("ghostport: {}", theme::ok(&format!("control channel connected from {peer_addr}")));
         ctx.state.control.set_connected(peer_addr.to_string());
 
         let (mut read_half, mut write_half) = tokio::io::split(noise_stream);
         run_control_session(&mut read_half, &mut write_half, &mut open_stream_rx).await;
         ctx.state.control.set_disconnected();
-        println!("ghostport: control channel disconnected from {peer_addr}, awaiting reconnect");
+        println!("ghostport: {}", theme::warn(&format!("control channel disconnected from {peer_addr}, awaiting reconnect")));
     }
 }
 
@@ -177,17 +183,17 @@ async fn run_data_accept_loop(ctx: Arc<Context>, listen_addr: String, pending: P
     let listener = match TcpListener::bind(&listen_addr).await {
         Ok(l) => l,
         Err(e) => {
-            eprintln!("ghostport: fatal: failed to bind data listener {listen_addr}: {e}");
+            eprintln!("ghostport: {}", theme::err(&format!("fatal: failed to bind data listener {listen_addr}: {e}")));
             return;
         }
     };
-    println!("ghostport: data channel listening on {listen_addr}");
+    println!("ghostport: {}", theme::ok(&format!("data channel listening on {listen_addr}")));
 
     loop {
         let (tcp, peer_addr) = match listener.accept().await {
             Ok(v) => v,
             Err(e) => {
-                eprintln!("ghostport: data accept failed: {e}");
+                eprintln!("ghostport: {}", theme::err(&format!("data accept failed: {e}")));
                 continue;
             }
         };
@@ -195,7 +201,7 @@ async fn run_data_accept_loop(ctx: Arc<Context>, listen_addr: String, pending: P
         let pending = pending.clone();
         tokio::spawn(async move {
             if let Err(e) = handle_data_connection(ctx, tcp, pending).await {
-                eprintln!("ghostport: data connection from {peer_addr}: {e}");
+                eprintln!("ghostport: {}", theme::err(&format!("data connection from {peer_addr}: {e}")));
             }
         });
     }

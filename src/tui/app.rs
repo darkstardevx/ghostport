@@ -166,18 +166,42 @@ impl App {
         self.pending_link_mode.map(|m| self.config.link_needs_listen(m))
     }
 
+    /// Live feedback while typing an address in `AddLinkAddress` —
+    /// `None` while the field is empty (nothing to judge yet), `Some`
+    /// afterward. Lets the UI show "not a valid host:port" as you type,
+    /// not just when Enter is pressed or the config is saved.
+    pub fn link_address_input_status(&self) -> Option<bool> {
+        let trimmed = self.input_buffer.trim();
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed.parse::<std::net::SocketAddr>().is_ok())
+        }
+    }
+
     pub fn confirm_link_address(&mut self) {
         let (Some(id), Some(mode)) = (self.pending_link_id.take(), self.pending_link_mode.take()) else {
             self.mode = Mode::Normal;
             return;
         };
         let addr = self.input_buffer.trim().to_string();
-        self.input_buffer.clear();
-        self.mode = Mode::Normal;
         if addr.is_empty() {
+            self.input_buffer.clear();
+            self.mode = Mode::Normal;
             self.message = Some("add cancelled: address can't be empty".to_string());
             return;
         }
+        if addr.parse::<std::net::SocketAddr>().is_err() {
+            // Put the pending state back so the wizard stays right where
+            // it was — fix the typo and press enter again, no need to
+            // restart the whole add from the id step.
+            self.pending_link_id = Some(id);
+            self.pending_link_mode = Some(mode);
+            self.message = Some(format!("\"{addr}\" isn't a valid host:port (e.g. 127.0.0.1:5432) — fix it and press enter"));
+            return;
+        }
+        self.input_buffer.clear();
+        self.mode = Mode::Normal;
 
         let needs_listen = self.config.link_needs_listen(mode);
         let link = if needs_listen {
@@ -357,6 +381,54 @@ mod tests {
         assert_eq!(app.mode, Mode::Normal);
         assert!(app.config.links.is_empty());
         assert!(!app.dirty);
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn invalid_address_is_rejected_without_losing_the_wizard_progress() {
+        let path = scratch_config_path("invalid-addr");
+        write_sample_config(&path);
+        let mut app = App::new(path.clone(), PathBuf::from("/tmp/nonexistent.sock")).unwrap();
+
+        app.begin_add_link();
+        app.input_buffer = "dev".to_string();
+        app.confirm_link_id();
+        app.choose_link_mode(LinkMode::Reverse);
+
+        app.input_buffer = "not-a-real-address".to_string();
+        app.confirm_link_address();
+
+        // Stays in AddLinkAddress (not bounced back to Normal) so the
+        // user can just fix the typo and press enter again.
+        assert_eq!(app.mode, Mode::AddLinkAddress);
+        assert!(app.message.as_deref().unwrap_or_default().contains("isn't a valid host:port"));
+        assert!(app.config.links.is_empty());
+
+        // Fixing it and confirming again should now succeed.
+        app.input_buffer = "127.0.0.1:3000".to_string();
+        app.confirm_link_address();
+        assert_eq!(app.mode, Mode::Normal);
+        assert_eq!(app.config.links.len(), 1);
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn link_address_input_status_reflects_validity_live() {
+        let path = scratch_config_path("live-validation");
+        write_sample_config(&path);
+        let mut app = App::new(path.clone(), PathBuf::from("/tmp/nonexistent.sock")).unwrap();
+        app.begin_add_link();
+        app.input_buffer = "dev".to_string();
+        app.confirm_link_id();
+        app.choose_link_mode(LinkMode::Reverse);
+
+        assert_eq!(app.link_address_input_status(), None); // nothing typed yet
+
+        app.input_buffer = "not-valid".to_string();
+        assert_eq!(app.link_address_input_status(), Some(false));
+
+        app.input_buffer = "127.0.0.1:3000".to_string();
+        assert_eq!(app.link_address_input_status(), Some(true));
         std::fs::remove_file(&path).ok();
     }
 }

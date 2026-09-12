@@ -8,8 +8,9 @@
 use crate::config::{Config, LinkMode};
 use crate::protocol::{ControlMessage, StreamHello};
 use crate::stats::SharedState;
-use crate::{framing, ipc, noise, relay};
+use crate::{framing, ipc, noise, relay, theme};
 use snowstorm::NoiseStream;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::net::{TcpListener, TcpStream};
@@ -19,12 +20,17 @@ pub struct Context {
     pub private_key: Arc<Vec<u8>>,
     pub peer_public_key: Arc<Vec<u8>>,
     pub state: Arc<SharedState>,
+    /// Where this instance's status IPC socket lives. Not always the
+    /// default — running both roles on one machine (e.g. a local demo)
+    /// needs two distinct paths, since two daemons can't share one
+    /// socket file.
+    pub socket_path: PathBuf,
 }
 
 pub async fn run(ctx: Context) -> std::io::Result<()> {
     let ctx = Arc::new(ctx);
 
-    tokio::spawn(ipc::run_ipc_server(ctx.state.clone(), ctx.config.clone(), ipc::default_socket_path()));
+    tokio::spawn(ipc::run_ipc_server(ctx.state.clone(), ctx.config.clone(), ctx.socket_path.clone()));
 
     for link in &ctx.config.links {
         if link.mode == LinkMode::Forward {
@@ -41,17 +47,17 @@ async fn run_forward_listener(ctx: Arc<Context>, link_id: String, listen_addr: S
     let listener = match TcpListener::bind(&listen_addr).await {
         Ok(l) => l,
         Err(e) => {
-            eprintln!("ghostport: [{link_id}] failed to bind {listen_addr}: {e}");
+            eprintln!("ghostport: [{}] {}", theme::accent(&link_id), theme::err(&format!("failed to bind {listen_addr}: {e}")));
             return;
         }
     };
-    println!("ghostport: [{link_id}] listening on {listen_addr} (forward)");
+    println!("ghostport: [{}] {}", theme::accent(&link_id), theme::ok(&format!("listening on {listen_addr} (forward)")));
 
     loop {
         let (local_conn, peer_addr) = match listener.accept().await {
             Ok(v) => v,
             Err(e) => {
-                eprintln!("ghostport: [{link_id}] accept failed: {e}");
+                eprintln!("ghostport: [{}] {}", theme::accent(&link_id), theme::err(&format!("accept failed: {e}")));
                 continue;
             }
         };
@@ -59,7 +65,7 @@ async fn run_forward_listener(ctx: Arc<Context>, link_id: String, listen_addr: S
         let link_id = link_id.clone();
         tokio::spawn(async move {
             if let Err(e) = dial_data_tunnel_and_relay(&ctx, &link_id, None, local_conn).await {
-                eprintln!("ghostport: [{link_id}] {peer_addr}: {e}");
+                eprintln!("ghostport: [{}] {}", theme::accent(&link_id), theme::err(&format!("{peer_addr}: {e}")));
             }
         });
     }
@@ -98,15 +104,15 @@ async fn run_control_loop(ctx: Arc<Context>) {
     loop {
         match connect_control(&ctx, &server_control_addr).await {
             Ok(mut noise_stream) => {
-                println!("ghostport: control channel connected to {server_control_addr}");
+                println!("ghostport: {}", theme::ok(&format!("control channel connected to {server_control_addr}")));
                 ctx.state.control.set_connected(server_control_addr.clone());
                 backoff = Duration::from_secs(1);
                 run_control_session(&ctx, &mut noise_stream).await;
                 ctx.state.control.set_disconnected();
-                println!("ghostport: control channel disconnected, reconnecting...");
+                println!("ghostport: {}", theme::warn("control channel disconnected, reconnecting..."));
             }
             Err(e) => {
-                eprintln!("ghostport: control channel connect to {server_control_addr} failed: {e}");
+                eprintln!("ghostport: {}", theme::err(&format!("control channel connect to {server_control_addr} failed: {e}")));
             }
         }
         tokio::time::sleep(backoff).await;
@@ -141,7 +147,7 @@ async fn run_control_session(ctx: &Arc<Context>, noise_stream: &mut NoiseStream<
                     }
                     Ok(ControlMessage::OpenStream { link_id, stream_id }) => {
                         if !link_expects_reverse(&ctx.config, &link_id) {
-                            eprintln!("ghostport: received OpenStream for unknown/non-reverse link \"{link_id}\", ignoring");
+                            eprintln!("ghostport: {}", theme::warn(&format!("received OpenStream for unknown/non-reverse link \"{link_id}\", ignoring")));
                             continue;
                         }
                         let ctx = ctx.clone();
@@ -161,17 +167,17 @@ fn link_expects_reverse(config: &Config, link_id: &str) -> bool {
 async fn handle_open_stream(ctx: Arc<Context>, link_id: String, stream_id: u64) {
     let Some(link) = ctx.config.links.iter().find(|l| l.id == link_id) else { return };
     let Some(target) = link.target.clone() else {
-        eprintln!("ghostport: [{link_id}] reverse link has no target configured, can't fulfill stream {stream_id}");
+        eprintln!("ghostport: [{}] {}", theme::accent(&link_id), theme::err(&format!("reverse link has no target configured, can't fulfill stream {stream_id}")));
         return;
     };
     let local_conn = match TcpStream::connect(&target).await {
         Ok(c) => c,
         Err(e) => {
-            eprintln!("ghostport: [{link_id}] failed to connect to target {target}: {e}");
+            eprintln!("ghostport: [{}] {}", theme::accent(&link_id), theme::err(&format!("failed to connect to target {target}: {e}")));
             return;
         }
     };
     if let Err(e) = dial_data_tunnel_and_relay(&ctx, &link_id, Some(stream_id), local_conn).await {
-        eprintln!("ghostport: [{link_id}] stream {stream_id}: {e}");
+        eprintln!("ghostport: [{}] {}", theme::accent(&link_id), theme::err(&format!("stream {stream_id}: {e}")));
     }
 }

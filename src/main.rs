@@ -8,6 +8,7 @@ mod protocol;
 mod relay;
 mod server;
 mod stats;
+mod theme;
 mod tui;
 
 use clap::{Parser, Subcommand};
@@ -36,7 +37,15 @@ enum Commands {
     /// Validate a config file without starting the daemon.
     Check { config: PathBuf },
     /// Start the daemon (server or client role, per the config file).
-    Run { config: PathBuf },
+    Run {
+        config: PathBuf,
+        /// Status IPC socket path. Defaults to
+        /// ~/.local/state/ghostport/ghostport.sock — override when
+        /// running more than one instance on the same machine (they
+        /// can't share a socket file).
+        #[arg(long)]
+        socket: Option<PathBuf>,
+    },
     /// Query a running daemon's live status over its Unix socket.
     Status {
         /// Path to the status socket. Defaults to
@@ -94,11 +103,11 @@ fn run_keygen(out: &str) -> ExitCode {
         return ExitCode::FAILURE;
     }
 
-    println!("Private key saved to {} (0600)", path.display());
-    println!("Public key saved to  {}", pub_path.display());
+    println!("Private key saved to {} (0600)", theme::accent(&path.display().to_string()));
+    println!("Public key saved to  {}", theme::accent(&pub_path.display().to_string()));
     println!();
     println!("Give this public key to the peer, for their config's `peer_public_key`:");
-    println!("  {}", keys::encode_public_key(&kp.public));
+    println!("  {}", theme::emphasis(&keys::encode_public_key(&kp.public)));
     ExitCode::SUCCESS
 }
 
@@ -106,18 +115,18 @@ fn run_check(config_path: &PathBuf) -> ExitCode {
     let cfg = match Config::load(config_path) {
         Ok(c) => c,
         Err(e) => {
-            eprintln!("ghostport: {e}");
+            eprintln!("ghostport: {}", theme::err(&e));
             return ExitCode::FAILURE;
         }
     };
     let errors = cfg.validate();
     if errors.is_empty() {
-        println!("ghostport: {} is valid ({:?} role, {} link{})", config_path.display(), cfg.role, cfg.links.len(), if cfg.links.len() == 1 { "" } else { "s" });
+        println!("ghostport: {} is {} ({:?} role, {} link{})", config_path.display(), theme::ok("valid"), cfg.role, cfg.links.len(), if cfg.links.len() == 1 { "" } else { "s" });
         ExitCode::SUCCESS
     } else {
-        eprintln!("ghostport: {} has {} problem(s):", config_path.display(), errors.len());
+        eprintln!("ghostport: {} has {} {}:", config_path.display(), errors.len(), theme::err(if errors.len() == 1 { "problem" } else { "problems" }));
         for e in &errors {
-            eprintln!("  - {e}");
+            eprintln!("  - {}", theme::warn(e));
         }
         ExitCode::FAILURE
     }
@@ -151,13 +160,14 @@ async fn run_status(socket: PathBuf, watch: bool, json: bool) -> ExitCode {
 }
 
 fn print_status(snapshot: &stats::StatusSnapshot) {
-    let green = cybercore::palette::acid_green();
-    let red = cybercore::palette::red();
+    let purple = cybercore::palette::purple();
+    let hot_pink = cybercore::palette::hot_pink();
     let cyan = cybercore::palette::cyan();
+    let orange = cybercore::palette::orange();
     let r = cybercore::palette::RESET;
 
-    let control = if snapshot.control_connected { format!("{green}connected{r}") } else { format!("{red}disconnected{r}") };
-    println!("role: {}   uptime: {}s   control channel: {control}", snapshot.role, snapshot.uptime_secs);
+    let control = if snapshot.control_connected { theme::ok("connected") } else { theme::err("disconnected") };
+    println!("role: {purple}{}{r}   uptime: {cyan}{}s{r}   control channel: {control}", snapshot.role, snapshot.uptime_secs);
     if snapshot.control_connected {
         if let (Some(addr), Some(since)) = (&snapshot.control_peer_addr, snapshot.control_connected_since_secs_ago) {
             println!("  peer: {addr}  (connected {since}s ago)");
@@ -169,11 +179,18 @@ fn print_status(snapshot: &stats::StatusSnapshot) {
         println!("(no links configured)");
     }
     for link in &snapshot.links {
-        println!("{:<14} {:<9} {:>7} {:>7} {:>12} {:>12}", link.id, link.mode, link.active_streams, link.total_streams, link.bytes_forward, link.bytes_back);
+        let mode_color = if link.mode == "forward" { &cyan } else { &hot_pink };
+        // Pad the plain number to width first, then color the whole
+        // already-padded string — coloring first and padding second
+        // would count the ANSI escape bytes toward the width and throw
+        // off alignment.
+        let active_padded = format!("{:>7}", link.active_streams);
+        let active = if link.active_streams > 0 { theme::ok(&active_padded) } else { active_padded };
+        println!("{:<14} {mode_color}{:<9}{r} {active} {:>7} {orange}{:>12}{r} {orange}{:>12}{r}", link.id, link.mode, link.total_streams, link.bytes_forward, link.bytes_back);
     }
 }
 
-async fn run_daemon(config_path: &PathBuf) -> ExitCode {
+async fn run_daemon(config_path: &PathBuf, socket_path: PathBuf) -> ExitCode {
     let cfg = match Config::load(config_path) {
         Ok(c) => c,
         Err(e) => {
@@ -213,8 +230,8 @@ async fn run_daemon(config_path: &PathBuf) -> ExitCode {
     let peer_public_key = Arc::new(peer_public_key);
 
     let result = match role {
-        Role::Server => server::run(server::Context { config, private_key, peer_public_key, state }).await,
-        Role::Client => client::run(client::Context { config, private_key, peer_public_key, state }).await,
+        Role::Server => server::run(server::Context { config, private_key, peer_public_key, state, socket_path }).await,
+        Role::Client => client::run(client::Context { config, private_key, peer_public_key, state, socket_path }).await,
     };
 
     match result {
@@ -235,10 +252,11 @@ fn main() -> ExitCode {
             run_keygen(&out)
         }
         Commands::Check { config } => run_check(&config),
-        Commands::Run { config } => {
+        Commands::Run { config, socket } => {
             banner();
+            let socket = socket.unwrap_or_else(ipc::default_socket_path);
             let runtime = tokio::runtime::Runtime::new().expect("failed to start tokio runtime");
-            runtime.block_on(run_daemon(&config))
+            runtime.block_on(run_daemon(&config, socket))
         }
         Commands::Status { socket, watch, json } => {
             let socket = socket.unwrap_or_else(ipc::default_socket_path);
@@ -272,6 +290,15 @@ mod integration_tests {
 
     fn free_port() -> u16 {
         std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port()
+    }
+
+    /// A private per-test-per-role socket path — `run()` always spawns
+    /// an IPC server at `Context::socket_path`, and two unrelated tests
+    /// (or two roles in the same test) sharing one path would race on
+    /// the same socket file, exactly the bug this field was added to
+    /// prevent in the real CLI (`ghostport run --socket`).
+    fn scratch_socket_path(name: &str) -> PathBuf {
+        std::env::temp_dir().join(format!("ghostport-main-test-{name}-{}-{}.sock", std::process::id(), free_port()))
     }
 
     /// Bounces back everything it reads, on every accepted connection —
@@ -371,12 +398,14 @@ mod integration_tests {
             private_key: Arc::new(server_kp.private),
             peer_public_key: Arc::new(client_kp.public.clone()),
             state: server_state.clone(),
+            socket_path: scratch_socket_path("server"),
         }));
         tokio::spawn(client::run(client::Context {
             config: client_config.clone(),
             private_key: Arc::new(client_kp.private),
             peer_public_key: Arc::new(server_kp.public.clone()),
             state: client_state.clone(),
+            socket_path: scratch_socket_path("client"),
         }));
 
         // Forward: hit the client's local port, expect it to have gone
@@ -423,6 +452,7 @@ mod integration_tests {
             private_key: Arc::new(server_kp.private),
             peer_public_key: Arc::new(client_kp.public.clone()),
             state,
+            socket_path: scratch_socket_path("wrongkey"),
         }));
 
         // Client pinned to the impostor's public key, not the real

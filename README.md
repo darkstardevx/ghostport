@@ -138,13 +138,17 @@ sufficient.
 
 - **Status** — the same live data as `ghostport status`, auto-refreshing.
 - **Links** — add (`a`), remove (`d`, with a confirm), and browse
-  configured links. Every add/remove is held in memory until you save
-  (`s`), which runs the same `Config::validate()` the daemon itself uses
-  before writing anything — an invalid edit is refused with the specific
-  reasons, never silently written. **No live reload**: saving prepares
-  the config for the *daemon's next start*, it doesn't affect an
-  already-running instance — the natural workflow is edit → save →
-  restart (Service tab).
+  configured links. Adding one is a guided 3-step wizard: id → direction
+  (`f`/`r`, with an inline one-line explanation of what forward/reverse
+  actually do — not just "press f or r") → address, with **live
+  validation** as you type it (a green ✓ or a red "needs host:port"
+  right in the input line, before you even press enter). Every add/remove
+  is held in memory until you save (`s`), which runs the same
+  `Config::validate()` the daemon itself uses before writing anything —
+  an invalid edit is refused with the specific reasons, never silently
+  written. **No live reload**: saving prepares the config for the
+  *daemon's next start*, it doesn't affect an already-running instance —
+  the natural workflow is edit → save → restart (Service tab).
 - **Service** — `s`/`x`/`r` to start/stop/restart the systemd service.
   Each suspends the TUI (leaves the alternate screen, disables raw mode),
   runs `sudo systemctl <action> ghostport` inheriting this process's
@@ -153,11 +157,20 @@ sufficient.
   TUI. Checking current state (`systemctl is-active`) needs no sudo,
   same reasoning as WraithFlow's `--admin --status`.
 
-Colors come from the active `cybercore` theme, same as CyberVault's TUI.
+Colors come from the active `cybercore` theme throughout, not just a
+couple of accents — forward/reverse links get distinct colors (cyan /
+hot pink) everywhere they're shown, key hints are colored per-letter
+against muted labels, an active stream count lights up green the moment
+it's actually carrying traffic, and byte counters get their own accent
+color. The plain CLI (`keygen`, `check`, `status`) is colored the same
+way via a small shared `theme.rs` helper — green for success, red for
+problems, cyan for paths/labels — and the daemon's own connection logs
+(`server.rs`/`client.rs`/`relay.rs`) pick up the same treatment when run
+in a real terminal.
 
 ## ✅ Verification
 
-38 tests. Per-module unit tests: config validation (every (role, mode)
+40 tests. Per-module unit tests: config validation (every (role, mode)
 ⇄ required-field combination, duplicate ids, bad addresses, TOML
 round-trip, `save()` refusing an invalid config and never touching disk
 when it does), key generation/save/load/permissions, the JSON framing
@@ -167,7 +180,9 @@ IPC socket (round-trips a real snapshot over a real Unix socket, correct
 `0600` permissions, fails cleanly when nothing's listening), and the
 TUI's link-editing logic (produces correctly-shaped links per the
 role/mode matrix, replaces on duplicate id, save clears the dirty flag
-and the reloaded file matches, remove marks dirty).
+and the reloaded file matches, remove marks dirty, an invalid address
+is rejected without losing wizard progress, and the live validation
+indicator reflects what's actually typed).
 
 Two full **end-to-end integration tests** against real running daemon
 instances — not mocked at any layer: real loopback TCP sockets, real
@@ -187,6 +202,7 @@ limitation as every other interactive tool built this session.
 ```
 src/keys.rs      static keypair generation/save/load, 0600 permissions
 src/noise.rs     Noise_KK handshake state construction
+src/theme.rs     shared ANSI color helpers for the CLI + daemon logs
 src/config.rs    TOML schema + validation + save()
 src/stats.rs     live runtime counters (atomics), StatusSnapshot
 src/ipc.rs       Unix-socket status server + client query

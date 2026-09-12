@@ -5,6 +5,7 @@
 //! there's nothing tunnel-specific to hand-roll here.
 
 use crate::stats::LinkStats;
+use crate::theme;
 use std::sync::atomic::Ordering::Relaxed;
 use tokio::io::{AsyncRead, AsyncWrite};
 
@@ -23,10 +24,10 @@ where
         Ok((a_to_b, b_to_a)) => {
             stats.bytes_forward.fetch_add(a_to_b, Relaxed);
             stats.bytes_back.fetch_add(b_to_a, Relaxed);
-            println!("ghostport: [{link_id}] stream closed ({a_to_b} bytes forward, {b_to_a} bytes back)");
+            println!("ghostport: [{}] stream closed ({a_to_b} bytes forward, {b_to_a} bytes back)", theme::accent(link_id));
         }
         Err(e) => {
-            eprintln!("ghostport: [{link_id}] stream ended with an error: {e}");
+            eprintln!("ghostport: [{}] {}", theme::accent(link_id), theme::err(&format!("stream ended with an error: {e}")));
         }
     }
 }
