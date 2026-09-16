@@ -1,1 +1,7 @@
 /target
+
+# Local-only override of the pinned gateflow git dependency, patching
+# it back to the on-disk checkout for fast local co-development
+# iteration. Never committed -- CI and fresh clones must resolve the
+# real pinned git dependency in Cargo.toml, not this machine's layout.
+/.cargo/config.toml
