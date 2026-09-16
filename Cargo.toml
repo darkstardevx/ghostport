@@ -3,6 +3,7 @@ name = "ghostport"
 version = "0.1.0"
 edition = "2021"
 description = "Encrypted, NAT-traversing port forwarder (Noise protocol) between a single pinned peer pair"
+license = "MIT"
 
 [dependencies]
 tokio = { version = "1.38", features = ["full"] }

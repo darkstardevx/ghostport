@@ -207,7 +207,7 @@ and the daemon's own connection logs (`server.rs`/`client.rs`/
 
 ## ✅ Verification
 
-50 tests. Per-module unit tests: config validation (every (role, mode)
+59 tests. Per-module unit tests: config validation (every (role, mode)
 ⇄ required-field combination, duplicate ids, bad addresses, TOML
 round-trip, `save()` refusing an invalid config and never touching disk
 when it does), key generation/save/load/permissions, the JSON framing
@@ -239,6 +239,13 @@ and `status --json` both queried a live instance over its real socket
 and returned correct live data; `tui` confirmed to fail gracefully
 (clear error, no panic) when there's no real TTY — same documented
 limitation as every other interactive tool built this session.
+
+**Supply chain**: `cargo deny check` ([`deny.toml`](deny.toml)) runs
+the dependency tree against RustSec's real advisory database (known
+vulnerabilities), an explicit license allow-list (MIT/Apache-2.0/BSD/
+Zlib/Unicode-3.0/etc. — no copyleft), and crates.io as the only allowed
+source — install with `cargo install cargo-deny --locked`, run with
+`cargo deny check` from the repo root.
 
 ## 🧩 Layout
 
