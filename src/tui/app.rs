@@ -13,7 +13,8 @@
 //! why the Service tab lives next to the Links tab: the natural
 //! workflow is edit -> save -> restart.
 
-use crate::config::{Config, LinkConfig, LinkMode};
+use crate::config::{Config, LinkConfig, LinkMode, PeerConfig, Role};
+use crate::keys;
 use crate::stats::StatusSnapshot;
 use crate::tui::templates;
 use std::path::PathBuf;
@@ -24,6 +25,7 @@ pub enum Tab {
     Status,
     Links,
     Service,
+    Peers,
 }
 
 #[derive(PartialEq, Eq, Clone, Copy, Debug)]
@@ -87,6 +89,10 @@ pub enum Mode {
     AddLinkAddress,
     ConfirmRemoveLink,
     ConfirmServiceAction,
+    AddPeerName,
+    AddPeerPublicKey,
+    AddPeerLinks,
+    ConfirmRemovePeer,
 }
 
 pub struct App {
@@ -124,6 +130,26 @@ pub struct App {
     /// lets `confirm_link_address` remove the *old* entry if the id
     /// itself was changed, instead of just deduping the new id.
     editing_original_id: Option<String>,
+
+    pub peers_selected: usize,
+    pending_peer_name: Option<String>,
+    pending_peer_public_key: Option<String>,
+    /// Pre-fill for the public-key step when editing an existing peer
+    /// (so re-confirming an unchanged 44-char key is just pressing
+    /// enter, not retyping it) — same role as `pending_default_address`
+    /// for links. `None` for a from-scratch add, which starts empty.
+    pending_default_peer_public_key: Option<String>,
+    /// The in-progress peer's checked link ids, built up as the
+    /// checklist step is toggled — not committed to `config.peers`
+    /// until `confirm_peer_links` confirms the whole wizard.
+    pending_peer_links: Vec<String>,
+    /// Cursor over `config.links` during the checklist step — distinct
+    /// from `peers_selected` (the outer Peers-tab list cursor).
+    pub peer_links_cursor: usize,
+    /// Set while editing an existing peer, holding its original name —
+    /// lets `confirm_peer_links` remove the *old* entry if the name
+    /// itself was changed, instead of just deduping the new name.
+    editing_original_peer_name: Option<String>,
 }
 
 impl App {
@@ -153,6 +179,13 @@ impl App {
             pending_link_mode: None,
             pending_default_address: None,
             editing_original_id: None,
+            peers_selected: 0,
+            pending_peer_name: None,
+            pending_peer_public_key: None,
+            pending_default_peer_public_key: None,
+            pending_peer_links: Vec::new(),
+            peer_links_cursor: 0,
+            editing_original_peer_name: None,
         })
     }
 
@@ -201,7 +234,8 @@ impl App {
         self.tab = match self.tab {
             Tab::Status => Tab::Links,
             Tab::Links => Tab::Service,
-            Tab::Service => Tab::Status,
+            Tab::Service => Tab::Peers,
+            Tab::Peers => Tab::Status,
         };
     }
 
@@ -424,6 +458,215 @@ impl App {
         }
     }
 
+    // --- Peers tab ---
+
+    pub fn selected_peer(&self) -> Option<&PeerConfig> {
+        self.config.peers.get(self.peers_selected)
+    }
+
+    pub fn move_peer_selection(&mut self, delta: isize) {
+        if self.config.peers.is_empty() {
+            return;
+        }
+        let len = self.config.peers.len() as isize;
+        let new = (self.peers_selected as isize + delta).rem_euclid(len);
+        self.peers_selected = new as usize;
+    }
+
+    /// 'a' on the Peers tab: peers only exist for a server-role config
+    /// (the client side pins exactly one server via `peer_public_key`,
+    /// nothing to manage here) — checked here too, not just left to the
+    /// UI layer to avoid offering the key in the first place.
+    pub fn begin_add_peer(&mut self) {
+        if self.config.role != Role::Server {
+            self.message =
+                Some("peers are a server-role feature — this config's role is client".to_string());
+            return;
+        }
+        self.editing_original_peer_name = None;
+        self.pending_peer_name = None;
+        self.pending_peer_public_key = None;
+        self.pending_default_peer_public_key = None;
+        self.pending_peer_links = Vec::new();
+        self.peer_links_cursor = 0;
+        self.input_buffer.clear();
+        self.mode = Mode::AddPeerName;
+    }
+
+    /// 'e': edit the selected peer — same wizard as adding, pre-filled
+    /// with its current name/key/links, replacing (or renaming) the
+    /// original entry rather than creating a duplicate.
+    pub fn begin_edit_peer(&mut self) {
+        if self.config.role != Role::Server {
+            return;
+        }
+        let Some(peer) = self.selected_peer().cloned() else {
+            return;
+        };
+        self.editing_original_peer_name = Some(peer.name.clone());
+        self.pending_peer_name = None;
+        self.pending_peer_public_key = None;
+        self.pending_default_peer_public_key = Some(peer.public_key);
+        self.pending_peer_links = peer.links;
+        self.peer_links_cursor = 0;
+        self.input_buffer = peer.name;
+        self.mode = Mode::AddPeerName;
+    }
+
+    pub fn is_editing_peer(&self) -> bool {
+        self.editing_original_peer_name.is_some()
+    }
+
+    pub fn confirm_peer_name(&mut self) {
+        let name = self.input_buffer.trim().to_string();
+        if name.is_empty() {
+            self.cancel_peer_wizard();
+            return;
+        }
+        self.pending_peer_name = Some(name);
+        self.input_buffer = self
+            .pending_default_peer_public_key
+            .clone()
+            .unwrap_or_default();
+        self.mode = Mode::AddPeerPublicKey;
+    }
+
+    /// Live feedback while typing a public key, same idea as
+    /// `link_address_input_status` — `None` while empty, `Some`
+    /// afterward, using the exact validation `config.rs::validate_peers`
+    /// (and the daemon) actually uses, so the wizard can't approve
+    /// something the daemon would later refuse.
+    pub fn peer_public_key_input_status(&self) -> Option<bool> {
+        let trimmed = self.input_buffer.trim();
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(keys::decode_public_key(trimmed).is_ok())
+        }
+    }
+
+    pub fn confirm_peer_public_key(&mut self) {
+        if self.pending_peer_name.is_none() {
+            self.mode = Mode::Normal;
+            return;
+        }
+        let key = self.input_buffer.trim().to_string();
+        if key.is_empty() {
+            self.input_buffer.clear();
+            self.mode = Mode::Normal;
+            self.editing_original_peer_name = None;
+            self.pending_peer_name = None;
+            self.pending_default_peer_public_key = None;
+            self.message = Some("cancelled: public key can't be empty".to_string());
+            return;
+        }
+        if keys::decode_public_key(&key).is_err() {
+            // Stays on this step, same "fix the typo and press enter
+            // again" UX as an invalid link address — doesn't discard
+            // the name already entered.
+            self.message =
+                Some("not a valid base64-encoded 32-byte key — fix it and press enter".to_string());
+            return;
+        }
+        self.pending_peer_public_key = Some(key);
+        self.peer_links_cursor = 0;
+        self.mode = Mode::AddPeerLinks;
+    }
+
+    pub fn move_peer_links_cursor(&mut self, delta: isize) {
+        if self.config.links.is_empty() {
+            return;
+        }
+        let len = self.config.links.len() as isize;
+        let new = (self.peer_links_cursor as isize + delta).rem_euclid(len);
+        self.peer_links_cursor = new as usize;
+    }
+
+    /// Space on the checklist step: toggles the link currently under
+    /// the cursor in/out of the in-progress peer's selected set.
+    pub fn toggle_peer_link(&mut self) {
+        let Some(link) = self.config.links.get(self.peer_links_cursor) else {
+            return;
+        };
+        let id = link.id.clone();
+        if let Some(pos) = self.pending_peer_links.iter().position(|l| *l == id) {
+            self.pending_peer_links.remove(pos);
+        } else {
+            self.pending_peer_links.push(id);
+        }
+    }
+
+    pub fn peer_link_is_checked(&self, link_id: &str) -> bool {
+        self.pending_peer_links.iter().any(|l| l == link_id)
+    }
+
+    /// Enter on the checklist step: an empty selection is a legitimate,
+    /// valid outcome (a peer provisioned but not yet granted access to
+    /// anything) — `config.rs::validate_peers` doesn't require a peer to
+    /// have any links, so this doesn't either.
+    pub fn confirm_peer_links(&mut self) {
+        let (Some(name), Some(public_key)) = (
+            self.pending_peer_name.take(),
+            self.pending_peer_public_key.take(),
+        ) else {
+            self.mode = Mode::Normal;
+            return;
+        };
+        let links = std::mem::take(&mut self.pending_peer_links);
+        self.pending_default_peer_public_key = None;
+        self.input_buffer.clear();
+        self.mode = Mode::Normal;
+
+        let peer = PeerConfig {
+            name: name.clone(),
+            public_key,
+            links,
+        };
+
+        let was_editing = self.editing_original_peer_name.is_some();
+        if let Some(old_name) = self.editing_original_peer_name.take() {
+            if old_name != name {
+                self.config.peers.retain(|p| p.name != old_name);
+            }
+        }
+        self.config.peers.retain(|p| p.name != name); // replace if this name already existed
+        self.config.peers.push(peer);
+        self.dirty = true;
+        self.peers_selected = self
+            .config
+            .peers
+            .iter()
+            .position(|p| p.name == name)
+            .unwrap_or(0);
+        let verb = if was_editing { "updated" } else { "added" };
+        self.message = Some(format!(
+            "{verb} peer \"{name}\" (unsaved — press s to write, or the daemon won't see it until restart)"
+        ));
+    }
+
+    pub fn cancel_peer_wizard(&mut self) {
+        self.pending_peer_name = None;
+        self.pending_peer_public_key = None;
+        self.pending_default_peer_public_key = None;
+        self.pending_peer_links = Vec::new();
+        self.editing_original_peer_name = None;
+        self.input_buffer.clear();
+        self.mode = Mode::Normal;
+    }
+
+    pub fn remove_selected_peer(&mut self) {
+        if self.peers_selected < self.config.peers.len() {
+            let removed = self.config.peers.remove(self.peers_selected);
+            self.peers_selected = self.peers_selected.saturating_sub(1);
+            self.dirty = true;
+            self.message = Some(format!(
+                "removed peer \"{}\" (unsaved — press s to write)",
+                removed.name
+            ));
+        }
+        self.mode = Mode::Normal;
+    }
+
     // --- Service tab ---
 
     pub fn move_service_selection(&mut self, delta: isize) {
@@ -480,6 +723,37 @@ mod tests {
             server_control_addr: Some("example.com:9000".to_string()),
             server_data_addr: Some("example.com:9001".to_string()),
             links: vec![],
+        };
+        std::fs::write(path, toml::to_string(&cfg).unwrap()).unwrap();
+    }
+
+    /// Server-role fixture, needed for peer tests — `write_sample_config`
+    /// above is client-role only. Comes with two pre-defined links for
+    /// the checklist tests to toggle against.
+    fn write_sample_server_config(path: &PathBuf) {
+        let cfg = Config {
+            role: Role::Server,
+            private_key_path: PathBuf::from("/tmp/identity.key"),
+            peer_public_key: None,
+            peers: vec![],
+            listen_control: Some("0.0.0.0:9000".to_string()),
+            listen_data: Some("0.0.0.0:9001".to_string()),
+            server_control_addr: None,
+            server_data_addr: None,
+            links: vec![
+                LinkConfig {
+                    id: "db".to_string(),
+                    mode: LinkMode::Forward,
+                    listen: None,
+                    target: Some("127.0.0.1:5432".to_string()),
+                },
+                LinkConfig {
+                    id: "dev".to_string(),
+                    mode: LinkMode::Reverse,
+                    listen: Some("0.0.0.0:8080".to_string()),
+                    target: None,
+                },
+            ],
         };
         std::fs::write(path, toml::to_string(&cfg).unwrap()).unwrap();
     }
@@ -825,6 +1099,287 @@ mod tests {
         write_sample_config(&path);
         let app = App::new(path.clone(), PathBuf::from("/tmp/nonexistent.sock")).unwrap();
         assert_eq!(app.link_rate("anything"), None);
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn add_peer_wizard_produces_a_correctly_shaped_peer() {
+        let path = scratch_config_path("add-peer");
+        write_sample_server_config(&path);
+        let mut app = App::new(path.clone(), PathBuf::from("/tmp/nonexistent.sock")).unwrap();
+        let peer_key_b64 = crate::keys::encode_public_key(&crate::keys::generate().public);
+
+        app.begin_add_peer();
+        assert_eq!(app.mode, Mode::AddPeerName);
+
+        app.input_buffer = "alice".to_string();
+        app.confirm_peer_name();
+        assert_eq!(app.mode, Mode::AddPeerPublicKey);
+
+        app.input_buffer = peer_key_b64.clone();
+        app.confirm_peer_public_key();
+        assert_eq!(app.mode, Mode::AddPeerLinks);
+
+        app.toggle_peer_link(); // cursor starts at 0 -> "db"
+        app.confirm_peer_links();
+
+        assert!(app.dirty);
+        let peer = app.config.peers.iter().find(|p| p.name == "alice").unwrap();
+        assert_eq!(peer.public_key, peer_key_b64);
+        assert_eq!(peer.links, vec!["db".to_string()]);
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn peer_links_checklist_toggles_selection() {
+        let path = scratch_config_path("peer-toggle");
+        write_sample_server_config(&path);
+        let mut app = App::new(path.clone(), PathBuf::from("/tmp/nonexistent.sock")).unwrap();
+        let peer_key_b64 = crate::keys::encode_public_key(&crate::keys::generate().public);
+
+        app.begin_add_peer();
+        app.input_buffer = "bob".to_string();
+        app.confirm_peer_name();
+        app.input_buffer = peer_key_b64;
+        app.confirm_peer_public_key();
+
+        assert!(!app.peer_link_is_checked("db"));
+        app.toggle_peer_link(); // cursor 0 -> "db"
+        assert!(app.peer_link_is_checked("db"));
+        app.toggle_peer_link(); // toggled back off
+        assert!(!app.peer_link_is_checked("db"));
+
+        app.move_peer_links_cursor(1); // cursor -> "dev"
+        app.toggle_peer_link();
+        assert!(app.peer_link_is_checked("dev"));
+        assert!(!app.peer_link_is_checked("db"));
+
+        app.confirm_peer_links();
+        let peer = app.config.peers.iter().find(|p| p.name == "bob").unwrap();
+        assert_eq!(peer.links, vec!["dev".to_string()]);
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn adding_a_peer_with_an_existing_name_replaces_it() {
+        let path = scratch_config_path("peer-replace");
+        write_sample_server_config(&path);
+        let mut app = App::new(path.clone(), PathBuf::from("/tmp/nonexistent.sock")).unwrap();
+        let old_key = crate::keys::encode_public_key(&crate::keys::generate().public);
+        app.config.peers.push(PeerConfig {
+            name: "alice".to_string(),
+            public_key: old_key,
+            links: vec![],
+        });
+
+        let new_key = crate::keys::encode_public_key(&crate::keys::generate().public);
+        app.begin_add_peer();
+        app.input_buffer = "alice".to_string();
+        app.confirm_peer_name();
+        app.input_buffer = new_key.clone();
+        app.confirm_peer_public_key();
+        app.toggle_peer_link();
+        app.confirm_peer_links();
+
+        assert_eq!(
+            app.config
+                .peers
+                .iter()
+                .filter(|p| p.name == "alice")
+                .count(),
+            1
+        );
+        assert_eq!(
+            app.config
+                .peers
+                .iter()
+                .find(|p| p.name == "alice")
+                .unwrap()
+                .public_key,
+            new_key
+        );
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn edit_peer_prefills_current_values_and_updates_in_place() {
+        let path = scratch_config_path("peer-edit");
+        write_sample_server_config(&path);
+        let mut app = App::new(path.clone(), PathBuf::from("/tmp/nonexistent.sock")).unwrap();
+        let key = crate::keys::encode_public_key(&crate::keys::generate().public);
+        app.config.peers.push(PeerConfig {
+            name: "alice".to_string(),
+            public_key: key.clone(),
+            links: vec!["db".to_string()],
+        });
+        app.peers_selected = 0;
+
+        app.begin_edit_peer();
+        assert_eq!(app.mode, Mode::AddPeerName);
+        assert_eq!(app.input_buffer, "alice"); // prefilled with current name
+        assert!(app.is_editing_peer());
+
+        app.confirm_peer_name(); // name unchanged
+        assert_eq!(app.mode, Mode::AddPeerPublicKey);
+        assert_eq!(app.input_buffer, key); // prefilled with the CURRENT key
+
+        app.confirm_peer_public_key(); // accept the prefilled key as-is
+        assert_eq!(app.mode, Mode::AddPeerLinks);
+        assert!(app.peer_link_is_checked("db")); // prefilled with current links
+
+        app.toggle_peer_link(); // cursor 0 -> "db", turn it off
+        app.move_peer_links_cursor(1); // -> "dev"
+        app.toggle_peer_link(); // turn "dev" on
+        app.confirm_peer_links();
+
+        assert_eq!(
+            app.config.peers.len(),
+            1,
+            "must update in place, not create a second entry"
+        );
+        assert_eq!(app.config.peers[0].links, vec!["dev".to_string()]);
+        assert!(app
+            .message
+            .as_deref()
+            .unwrap_or_default()
+            .contains("updated"));
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn editing_and_renaming_a_peer_removes_the_old_entry() {
+        let path = scratch_config_path("peer-rename");
+        write_sample_server_config(&path);
+        let mut app = App::new(path.clone(), PathBuf::from("/tmp/nonexistent.sock")).unwrap();
+        let key = crate::keys::encode_public_key(&crate::keys::generate().public);
+        app.config.peers.push(PeerConfig {
+            name: "old-name".to_string(),
+            public_key: key,
+            links: vec![],
+        });
+        app.peers_selected = 0;
+
+        app.begin_edit_peer();
+        app.input_buffer = "new-name".to_string(); // rename it
+        app.confirm_peer_name();
+        app.confirm_peer_public_key(); // key prefilled, accept as-is
+        app.confirm_peer_links(); // links prefilled empty, accept
+
+        assert_eq!(app.config.peers.len(), 1);
+        assert_eq!(app.config.peers[0].name, "new-name");
+        assert!(!app.config.peers.iter().any(|p| p.name == "old-name"));
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn invalid_peer_public_key_is_rejected_without_losing_wizard_progress() {
+        let path = scratch_config_path("peer-invalid-key");
+        write_sample_server_config(&path);
+        let mut app = App::new(path.clone(), PathBuf::from("/tmp/nonexistent.sock")).unwrap();
+
+        app.begin_add_peer();
+        app.input_buffer = "alice".to_string();
+        app.confirm_peer_name();
+
+        app.input_buffer = "not-a-real-key".to_string();
+        app.confirm_peer_public_key();
+
+        // Stays in AddPeerPublicKey (not bounced back to Normal) so the
+        // user can just fix it and press enter again.
+        assert_eq!(app.mode, Mode::AddPeerPublicKey);
+        assert!(app
+            .message
+            .as_deref()
+            .unwrap_or_default()
+            .contains("not a valid"));
+        assert!(app.config.peers.is_empty());
+
+        let real_key = crate::keys::encode_public_key(&crate::keys::generate().public);
+        app.input_buffer = real_key.clone();
+        app.confirm_peer_public_key();
+        assert_eq!(app.mode, Mode::AddPeerLinks);
+        app.confirm_peer_links();
+        assert_eq!(app.config.peers.len(), 1);
+        assert_eq!(app.config.peers[0].public_key, real_key);
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn remove_selected_peer_marks_dirty_and_removes_it() {
+        let path = scratch_config_path("peer-remove");
+        write_sample_server_config(&path);
+        let mut app = App::new(path.clone(), PathBuf::from("/tmp/nonexistent.sock")).unwrap();
+        app.config.peers.push(PeerConfig {
+            name: "a".to_string(),
+            public_key: crate::keys::encode_public_key(&crate::keys::generate().public),
+            links: vec![],
+        });
+        app.config.peers.push(PeerConfig {
+            name: "b".to_string(),
+            public_key: crate::keys::encode_public_key(&crate::keys::generate().public),
+            links: vec![],
+        });
+        app.peers_selected = 0;
+
+        app.remove_selected_peer();
+
+        assert!(app.dirty);
+        assert_eq!(app.config.peers.len(), 1);
+        assert_eq!(app.config.peers[0].name, "b");
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn begin_add_peer_is_a_noop_for_client_role_config() {
+        let path = scratch_config_path("peer-client-role");
+        write_sample_config(&path); // client role
+        let mut app = App::new(path.clone(), PathBuf::from("/tmp/nonexistent.sock")).unwrap();
+
+        app.begin_add_peer();
+
+        assert_eq!(
+            app.mode,
+            Mode::Normal,
+            "must not enter the peer wizard for a client-role config"
+        );
+        assert!(app
+            .message
+            .as_deref()
+            .unwrap_or_default()
+            .contains("server-role"));
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn peer_checklist_confirms_with_zero_links_when_none_are_configured() {
+        let path = scratch_config_path("peer-no-links");
+        let cfg = Config {
+            role: Role::Server,
+            private_key_path: PathBuf::from("/tmp/identity.key"),
+            peer_public_key: None,
+            peers: vec![],
+            listen_control: Some("0.0.0.0:9000".to_string()),
+            listen_data: Some("0.0.0.0:9001".to_string()),
+            server_control_addr: None,
+            server_data_addr: None,
+            links: vec![], // no links defined at all
+        };
+        std::fs::write(&path, toml::to_string(&cfg).unwrap()).unwrap();
+        let mut app = App::new(path.clone(), PathBuf::from("/tmp/nonexistent.sock")).unwrap();
+
+        app.begin_add_peer();
+        app.input_buffer = "alice".to_string();
+        app.confirm_peer_name();
+        app.input_buffer = crate::keys::encode_public_key(&crate::keys::generate().public);
+        app.confirm_peer_public_key();
+        assert_eq!(app.mode, Mode::AddPeerLinks);
+
+        // No links to toggle -- confirming directly should still
+        // succeed with an empty set, not get stuck.
+        app.confirm_peer_links();
+        assert_eq!(app.mode, Mode::Normal);
+        let peer = app.config.peers.iter().find(|p| p.name == "alice").unwrap();
+        assert!(peer.links.is_empty());
         std::fs::remove_file(&path).ok();
     }
 }

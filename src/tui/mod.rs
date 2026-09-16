@@ -99,7 +99,7 @@ fn run_event_loop(
                     app.apply_status(runtime.block_on(crate::ipc::query_status(&app.socket_path)))
                 }
                 app::Tab::Service => refresh_service_info(app),
-                app::Tab::Links => {}
+                app::Tab::Links | app::Tab::Peers => {}
             }
         }
 
@@ -125,6 +125,9 @@ fn handle_key(
         Mode::AddLinkDirection => handle_link_mode_choice(app, code),
         Mode::ConfirmRemoveLink => handle_confirm_remove_link(app, code),
         Mode::ConfirmServiceAction => handle_confirm_service_action(app, code, terminal, runtime),
+        Mode::AddPeerName | Mode::AddPeerPublicKey => handle_peer_text_input(app, code),
+        Mode::AddPeerLinks => handle_peer_links_checklist(app, code),
+        Mode::ConfirmRemovePeer => handle_confirm_remove_peer(app, code),
     }
 }
 
@@ -140,6 +143,7 @@ fn handle_normal(
         KeyCode::Char('1') => app.tab = Tab::Status,
         KeyCode::Char('2') => app.tab = Tab::Links,
         KeyCode::Char('3') => app.tab = Tab::Service,
+        KeyCode::Char('4') => app.tab = Tab::Peers,
         _ => match app.tab {
             Tab::Links => match code {
                 KeyCode::Char('j') | KeyCode::Down => app.move_link_selection(1),
@@ -176,6 +180,23 @@ fn handle_normal(
                     app.apply_status(runtime.block_on(crate::ipc::query_status(&app.socket_path)));
                 }
             }
+            Tab::Peers => match code {
+                KeyCode::Char('j') | KeyCode::Down => app.move_peer_selection(1),
+                KeyCode::Char('k') | KeyCode::Up => app.move_peer_selection(-1),
+                KeyCode::Char('a') => app.begin_add_peer(),
+                KeyCode::Char('e') => {
+                    if app.selected_peer().is_some() {
+                        app.begin_edit_peer();
+                    }
+                }
+                KeyCode::Char('d') => {
+                    if app.selected_peer().is_some() {
+                        app.mode = Mode::ConfirmRemovePeer;
+                    }
+                }
+                KeyCode::Char('s') => app.save_config(),
+                _ => {}
+            },
         },
     }
     Ok(())
@@ -219,6 +240,43 @@ fn handle_link_mode_choice(app: &mut App, code: KeyCode) -> io::Result<()> {
             app.choose_link_mode(crate::config::LinkMode::Reverse)
         }
         _ => {}
+    }
+    Ok(())
+}
+
+fn handle_peer_text_input(app: &mut App, code: KeyCode) -> io::Result<()> {
+    match code {
+        KeyCode::Esc => app.cancel_peer_wizard(),
+        KeyCode::Enter => match app.mode {
+            Mode::AddPeerName => app.confirm_peer_name(),
+            Mode::AddPeerPublicKey => app.confirm_peer_public_key(),
+            _ => {}
+        },
+        KeyCode::Backspace => {
+            app.input_buffer.pop();
+        }
+        KeyCode::Char(c) => app.input_buffer.push(c),
+        _ => {}
+    }
+    Ok(())
+}
+
+fn handle_peer_links_checklist(app: &mut App, code: KeyCode) -> io::Result<()> {
+    match code {
+        KeyCode::Esc => app.cancel_peer_wizard(),
+        KeyCode::Char('j') | KeyCode::Down => app.move_peer_links_cursor(1),
+        KeyCode::Char('k') | KeyCode::Up => app.move_peer_links_cursor(-1),
+        KeyCode::Char(' ') => app.toggle_peer_link(),
+        KeyCode::Enter => app.confirm_peer_links(),
+        _ => {}
+    }
+    Ok(())
+}
+
+fn handle_confirm_remove_peer(app: &mut App, code: KeyCode) -> io::Result<()> {
+    match code {
+        KeyCode::Char('y') | KeyCode::Char('Y') => app.remove_selected_peer(),
+        _ => app.mode = Mode::Normal,
     }
     Ok(())
 }

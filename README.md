@@ -182,7 +182,7 @@ sufficient.
 
 ## 🕹️ TUI — management console
 
-`ghostport tui <config>` — three tabs (`Tab`/`1`/`2`/`3` to switch):
+`ghostport tui <config>` — four tabs (`Tab`/`1`/`2`/`3`/`4` to switch):
 
 - **Status** — the same live data as `ghostport status`, auto-refreshing
   (`r` to force a refresh). Enriched beyond the raw CLI view: uptime and
@@ -225,6 +225,23 @@ sufficient.
   `journalctl -u ghostport -n 50 --no-pager` — deliberately no sudo, same
   "read-only status needs no privilege" reasoning as `is-active`/
   `is-enabled` (both shown at the top of the tab, refreshed live).
+- **Peers** — server-role only (a client pins exactly one server via
+  `peer_public_key`, nothing to manage here; on a client-role config
+  this tab explains that instead of showing an empty list). Browse,
+  add (`a`), edit (`e`), remove (`d`, with a confirm) the server's
+  allowed peers. Adding/editing walks name → public key → **which
+  links this peer may use** — the one genuinely new interaction: a
+  real multi-select checklist (`j`/`k` to move, `space` to toggle,
+  `enter` to confirm), since a peer can be restricted to any subset of
+  the server's configured links. The public-key step validates live
+  with the same ✓/✗ indicator the Links address step uses, via the
+  exact `keys::decode_public_key` the daemon itself uses — editing
+  pre-fills the current key so confirming an unchanged one is just
+  pressing enter, not retyping 44 characters. The peer list shows a
+  truncated fingerprint preview per row (the full one is what
+  `ghostport check`/`keygen` print, for the real out-of-band
+  comparison). Same save/validate/no-live-reload behavior as the Links
+  tab.
 
 Colors come from the active `cybercore` theme throughout, not just a
 couple of accents — forward/reverse links get distinct colors (cyan /
@@ -252,7 +269,7 @@ check`. Run the same gates locally before pushing:
 ./scripts/release-gates full    # + tests + cargo-deny
 ```
 
-72 tests. Per-module unit tests: config validation (every (role, mode)
+81 tests. Per-module unit tests: config validation (every (role, mode)
 ⇄ required-field combination, duplicate ids, bad addresses, TOML
 round-trip, `save()` refusing an invalid config and never touching disk
 when it does), key generation/save/load/permissions, the JSON framing

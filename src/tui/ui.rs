@@ -4,6 +4,7 @@
 
 use super::app::{App, Mode, ServiceAction, Tab, SERVICE_MENU};
 use super::{format, templates};
+use crate::keys;
 use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
@@ -64,6 +65,8 @@ pub fn draw(frame: &mut Frame, app: &App) {
         Mode::ChooseTemplate => templates::menu_len() as u16 + 2,
         Mode::AddLinkDirection => 6, // room for the forward/reverse explanation lines
         Mode::AddLinkId | Mode::AddLinkAddress => 3,
+        Mode::AddPeerName | Mode::AddPeerPublicKey => 3,
+        Mode::AddPeerLinks => app.config.links.len().max(1) as u16 + 2,
         _ => 0,
     };
 
@@ -86,6 +89,7 @@ pub fn draw(frame: &mut Frame, app: &App) {
         Tab::Status => draw_status(frame, &theme, app, chunks[2]),
         Tab::Links => draw_links(frame, &theme, app, chunks[2]),
         Tab::Service => draw_service(frame, &theme, app, chunks[2]),
+        Tab::Peers => draw_peers(frame, &theme, app, chunks[2]),
     }
 
     draw_footer(frame, &theme, app, chunks[3]);
@@ -114,6 +118,8 @@ fn draw_tabs(frame: &mut Frame, theme: &Theme, app: &App, area: Rect) {
         Span::styled("[2] links", tab_style(Tab::Links)),
         Span::raw("  "),
         Span::styled("[3] service", tab_style(Tab::Service)),
+        Span::raw("  "),
+        Span::styled("[4] peers", tab_style(Tab::Peers)),
     ]);
     let block = Block::default()
         .borders(Borders::ALL)
@@ -163,6 +169,40 @@ fn draw_input_line(frame: &mut Frame, theme: &Theme, app: &App, area: Rect) {
             );
         }
         Mode::AddLinkDirection => draw_mode_step(frame, theme, area, app),
+        Mode::AddPeerName => {
+            let verb = if app.is_editing_peer() { "edit" } else { "new" };
+            draw_text_step(
+                frame,
+                theme,
+                area,
+                &format!("{verb} peer — name"),
+                app,
+                None,
+            );
+        }
+        Mode::AddPeerPublicKey => {
+            let hint = match app.peer_public_key_input_status() {
+                None => None,
+                Some(true) => Some(Span::styled(
+                    "  ✓ valid",
+                    Style::default().fg(theme.acid_green),
+                )),
+                Some(false) => Some(Span::styled(
+                    "  ✗ not a valid base64-encoded 32-byte key",
+                    Style::default().fg(theme.red),
+                )),
+            };
+            let verb = if app.is_editing_peer() { "edit" } else { "new" };
+            draw_text_step(
+                frame,
+                theme,
+                area,
+                &format!("{verb} peer — public key (from its own `ghostport keygen`)"),
+                app,
+                hint,
+            );
+        }
+        Mode::AddPeerLinks => draw_peer_links_checklist(frame, theme, app, area),
         _ => {}
     }
 }
@@ -274,6 +314,68 @@ fn draw_mode_step(frame: &mut Frame, theme: &Theme, area: Rect, app: &App) {
         Line::from(Span::styled("esc cancel", Style::default().fg(theme.muted))),
     ];
     frame.render_widget(Paragraph::new(lines).block(block), area);
+}
+
+/// Which links the in-progress peer may use — a real multi-select
+/// checklist (`space` toggles, same list-navigation feel as the
+/// template chooser), since a peer can be restricted to any subset of
+/// the server's configured links, not just one.
+fn draw_peer_links_checklist(frame: &mut Frame, theme: &Theme, app: &App, area: Rect) {
+    let verb = if app.is_editing_peer() { "edit" } else { "new" };
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(theme.cyan))
+        .title(Span::styled(
+            format!(" {verb} peer — links this peer may use "),
+            Style::default().fg(theme.cyan).add_modifier(Modifier::BOLD),
+        ));
+
+    if app.config.links.is_empty() {
+        let text = Line::from(Span::styled(
+            "no links defined yet — add one on the Links tab (space/enter still confirms with none)",
+            Style::default().fg(theme.muted),
+        ));
+        frame.render_widget(Paragraph::new(text).block(block), area);
+        return;
+    }
+
+    let items: Vec<ListItem> = app
+        .config
+        .links
+        .iter()
+        .map(|l| {
+            let checked = app.peer_link_is_checked(&l.id);
+            let checkbox = if checked { "[x] " } else { "[ ] " };
+            let mode_color = theme.mode_color(l.mode == crate::config::LinkMode::Forward);
+            ListItem::new(Line::from(vec![
+                Span::styled(
+                    checkbox,
+                    if checked {
+                        Style::default()
+                            .fg(theme.acid_green)
+                            .add_modifier(Modifier::BOLD)
+                    } else {
+                        Style::default().fg(theme.muted)
+                    },
+                ),
+                Span::styled(format!("{:<20}", l.id), Style::default().fg(theme.white)),
+                Span::styled(
+                    format!("{:?}", l.mode).to_lowercase(),
+                    Style::default().fg(mode_color),
+                ),
+            ]))
+        })
+        .collect();
+    let list = List::new(items)
+        .block(block)
+        .highlight_style(
+            Style::default()
+                .fg(theme.acid_green)
+                .add_modifier(Modifier::BOLD),
+        )
+        .highlight_symbol("> ");
+    let mut state = ListState::default().with_selected(Some(app.peer_links_cursor));
+    frame.render_stateful_widget(list, area, &mut state);
 }
 
 fn draw_status(frame: &mut Frame, theme: &Theme, app: &App, area: Rect) {
@@ -512,6 +614,106 @@ fn draw_links(frame: &mut Frame, theme: &Theme, app: &App, area: Rect) {
     }
 }
 
+fn draw_peers(frame: &mut Frame, theme: &Theme, app: &App, area: Rect) {
+    let title = if app.dirty {
+        " peers (unsaved changes) "
+    } else {
+        " peers "
+    };
+    let title_style = if app.dirty {
+        Style::default()
+            .fg(theme.orange)
+            .add_modifier(Modifier::BOLD)
+    } else {
+        Style::default()
+            .fg(theme.purple)
+            .add_modifier(Modifier::BOLD)
+    };
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(theme.line))
+        .title(Span::styled(title, title_style));
+
+    if app.config.role != crate::config::Role::Server {
+        let lines = vec![
+            Line::from(Span::styled(
+                "peers are a server-role feature",
+                Style::default().fg(theme.muted),
+            )),
+            Line::from(Span::styled(
+                "this config's role is client — it pins exactly one server via `peer_public_key`",
+                Style::default().fg(theme.muted),
+            )),
+        ];
+        frame.render_widget(Paragraph::new(lines).block(block), area);
+        return;
+    }
+
+    let rows: Vec<Row> = app
+        .config
+        .peers
+        .iter()
+        .enumerate()
+        .map(|(i, p)| {
+            let selected = i == app.peers_selected;
+            let name_style = if selected {
+                Style::default()
+                    .fg(theme.acid_green)
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(theme.white)
+            };
+            // Full fingerprint (95 chars) doesn't fit a table row -- a
+            // short prefix is enough as a visual identifier here; the
+            // real out-of-band comparison uses `ghostport check`'s full
+            // output, same string, just not truncated there.
+            let fingerprint = match keys::decode_public_key(&p.public_key) {
+                Ok(k) => {
+                    let full = keys::fingerprint(&k);
+                    format!("{}…", &full[..full.len().min(23)])
+                }
+                Err(_) => "invalid key".to_string(),
+            };
+            let links = if p.links.is_empty() {
+                "(none)".to_string()
+            } else {
+                p.links.join(", ")
+            };
+            Row::new(vec![
+                Cell::from(p.name.clone()).style(name_style),
+                Cell::from(fingerprint).style(Style::default().fg(theme.muted)),
+                Cell::from(links).style(Style::default().fg(theme.white)),
+            ])
+        })
+        .collect();
+    let widths = [
+        Constraint::Length(16),
+        Constraint::Length(26),
+        Constraint::Min(20),
+    ];
+    let table = Table::new(rows, widths)
+        .header(
+            Row::new(vec!["name", "fingerprint", "links"])
+                .style(Style::default().fg(theme.cyan).add_modifier(Modifier::BOLD)),
+        )
+        .column_spacing(2)
+        .block(block);
+    frame.render_widget(table, area);
+
+    if app.config.peers.is_empty() {
+        let hint = Paragraph::new(Line::from(Span::styled(
+            "no peers yet — press 'a' to add one",
+            Style::default().fg(theme.muted),
+        )));
+        let inner = Rect {
+            y: area.y + 2,
+            height: 1,
+            ..area
+        };
+        frame.render_widget(hint, inner);
+    }
+}
+
 fn service_action_color(theme: &Theme, action: ServiceAction) -> Color {
     match action {
         ServiceAction::Start | ServiceAction::Enable => theme.acid_green,
@@ -627,9 +829,25 @@ fn draw_footer(frame: &mut Frame, theme: &Theme, app: &App, area: Rect) {
                     .fg(theme.orange)
                     .add_modifier(Modifier::BOLD),
             )),
+            (_, Mode::AddPeerName | Mode::AddPeerPublicKey) => {
+                key_hints(theme, &[("enter", "confirm"), ("esc", "cancel")])
+            }
+            (_, Mode::AddPeerLinks) => key_hints(
+                theme,
+                &[
+                    ("j/k", "move"),
+                    ("space", "toggle"),
+                    ("enter", "confirm"),
+                    ("esc", "cancel"),
+                ],
+            ),
+            (_, Mode::ConfirmRemovePeer) => Line::from(Span::styled(
+                "remove this peer? y/n",
+                Style::default().fg(theme.red).add_modifier(Modifier::BOLD),
+            )),
             (Tab::Status, Mode::Normal) => key_hints(
                 theme,
-                &[("r", "refresh"), ("tab/1-3", "switch"), ("q", "quit")],
+                &[("r", "refresh"), ("tab/1-4", "switch"), ("q", "quit")],
             ),
             (Tab::Links, Mode::Normal) => key_hints(
                 theme,
@@ -639,7 +857,7 @@ fn draw_footer(frame: &mut Frame, theme: &Theme, app: &App, area: Rect) {
                     ("e", "edit"),
                     ("d", "delete"),
                     ("s", "save"),
-                    ("tab/1-3", "switch"),
+                    ("tab/1-4", "switch"),
                     ("q", "quit"),
                 ],
             ),
@@ -648,7 +866,19 @@ fn draw_footer(frame: &mut Frame, theme: &Theme, app: &App, area: Rect) {
                 &[
                     ("j/k", "move"),
                     ("enter", "select"),
-                    ("tab/1-3", "switch"),
+                    ("tab/1-4", "switch"),
+                    ("q", "quit"),
+                ],
+            ),
+            (Tab::Peers, Mode::Normal) => key_hints(
+                theme,
+                &[
+                    ("j/k", "move"),
+                    ("a", "add peer"),
+                    ("e", "edit"),
+                    ("d", "delete"),
+                    ("s", "save"),
+                    ("tab/1-4", "switch"),
                     ("q", "quit"),
                 ],
             ),
