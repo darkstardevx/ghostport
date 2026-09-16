@@ -8,6 +8,8 @@ mod protocol;
 mod relay;
 mod server;
 mod stats;
+#[cfg(test)]
+mod tests_gateflow;
 mod theme;
 mod tui;
 

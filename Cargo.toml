@@ -17,3 +17,9 @@ base64 = "0.22"
 cybercore = { path = "/home/raven/.sysops/cybercore" }
 ratatui = "0.30.2"
 crossterm = "0.29.0"
+
+[dev-dependencies]
+# Local path, not crates.io -- gateflow isn't published yet. Used by
+# src/tests_gateflow.rs to run the forward-link test across two real
+# Linux network namespaces instead of one process on loopback.
+gateflow = { path = "../../../Devspace/rust/gateflow" }

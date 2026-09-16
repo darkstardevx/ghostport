@@ -1,0 +1,210 @@
+//! Forward-link round trip across two *real* Linux network namespaces,
+//! connected by a real veth pair (via `gateflow`), instead of one
+//! process talking to itself over loopback like `main.rs`'s
+//! `integration_tests` module does.
+//!
+//! Same "nothing mocked" philosophy that module is already built on —
+//! this just closes the one thing it can't reach: the control/data
+//! channels crossing a real network boundary, not two tasks in the same
+//! process sharing one loopback. `server::run`/`client::run` themselves
+//! are completely unmodified; only which addresses they're told to bind/
+//! dial changes.
+//!
+//! Reverse-mode isn't covered here yet — forward alone is enough to
+//! prove the real-namespace approach works at all; reverse (needing the
+//! control-channel OpenStream signal, not just a direct dial) is the
+//! natural next case once this pattern is proven out.
+
+use std::path::PathBuf;
+use std::sync::atomic::Ordering;
+use std::sync::Arc;
+use std::time::{Duration, Instant};
+
+use gateflow::veth::VethEnd;
+use gateflow::Sandbox;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::{TcpListener, TcpStream};
+
+use crate::config::{Config, LinkConfig, LinkMode, Role};
+use crate::stats::SharedState;
+use crate::{client, keys, server};
+
+const CONTROL_PORT: u16 = 17800;
+const DATA_PORT: u16 = 17801;
+const FORWARD_TARGET_PORT: u16 = 17802;
+const FORWARD_LOCAL_PORT: u16 = 17803;
+
+async fn connect_with_retry(addr: &str, timeout: Duration) -> Option<TcpStream> {
+    let deadline = Instant::now() + timeout;
+    loop {
+        if let Ok(s) = TcpStream::connect(addr).await {
+            return Some(s);
+        }
+        if Instant::now() >= deadline {
+            return None;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+}
+
+fn scratch_socket_path(role: &str) -> PathBuf {
+    std::env::temp_dir().join(format!(
+        "ghostport-netns-test-{role}-{}.sock",
+        std::process::id()
+    ))
+}
+
+#[test]
+fn forward_link_round_trips_across_real_network_namespaces() {
+    let server_kp = keys::generate();
+    let client_kp = keys::generate();
+    let server_pub = server_kp.public.clone();
+    let client_pub = client_kp.public.clone();
+
+    let (a_code, b_code) = Sandbox::paired()
+        .enter(
+            // Side A: the server, plus the "real destination" its forward
+            // link relays to — both live in this namespace, on its own
+            // loopback, same as a real deployment would have them.
+            move |end: VethEnd| {
+                let runtime = match tokio::runtime::Runtime::new() {
+                    Ok(rt) => rt,
+                    Err(_) => return 90,
+                };
+                runtime.block_on(async move {
+                    let listener =
+                        match TcpListener::bind(format!("127.0.0.1:{FORWARD_TARGET_PORT}")).await {
+                            Ok(l) => l,
+                            Err(_) => return 91,
+                        };
+                    tokio::spawn(async move {
+                        loop {
+                            let Ok((mut sock, _)) = listener.accept().await else {
+                                return;
+                            };
+                            tokio::spawn(async move {
+                                let (mut r, mut w) = sock.split();
+                                let _ = tokio::io::copy(&mut r, &mut w).await;
+                            });
+                        }
+                    });
+
+                    let server_config = Config {
+                        role: Role::Server,
+                        private_key_path: PathBuf::new(),
+                        peer_public_key: keys::encode_public_key(&client_pub),
+                        listen_control: Some(format!("{}:{CONTROL_PORT}", end.address)),
+                        listen_data: Some(format!("{}:{DATA_PORT}", end.address)),
+                        server_control_addr: None,
+                        server_data_addr: None,
+                        links: vec![LinkConfig {
+                            id: "fwd".to_string(),
+                            mode: LinkMode::Forward,
+                            listen: None,
+                            target: Some(format!("127.0.0.1:{FORWARD_TARGET_PORT}")),
+                        }],
+                    };
+                    if !server_config.validate().is_empty() {
+                        return 92;
+                    }
+
+                    let state = Arc::new(SharedState::new(&server_config));
+                    tokio::spawn(server::run(server::Context {
+                        config: Arc::new(server_config),
+                        private_key: Arc::new(server_kp.private),
+                        peer_public_key: Arc::new(client_pub),
+                        state: state.clone(),
+                        socket_path: scratch_socket_path("server"),
+                    }));
+
+                    // No completion signal from the client side is exposed
+                    // by gateflow's API yet (Sandbox::paired's two closures
+                    // don't share memory once forked, and there's no IPC
+                    // channel surfaced to caller code) — wait long enough
+                    // for the client's own round trip to finish, then check
+                    // what actually happened via the shared stats.
+                    tokio::time::sleep(Duration::from_secs(3)).await;
+
+                    if state.links["fwd"].total_streams.load(Ordering::Relaxed) != 1 {
+                        return 93;
+                    }
+                    if state.links["fwd"].bytes_forward.load(Ordering::Relaxed) == 0 {
+                        return 94;
+                    }
+
+                    0
+                })
+            },
+            // Side B: the client, plus the local app-facing port a real
+            // user would connect to.
+            move |end: VethEnd| {
+                let runtime = match tokio::runtime::Runtime::new() {
+                    Ok(rt) => rt,
+                    Err(_) => return 90,
+                };
+                runtime.block_on(async move {
+                    let client_config = Config {
+                        role: Role::Client,
+                        private_key_path: PathBuf::new(),
+                        peer_public_key: keys::encode_public_key(&server_pub),
+                        listen_control: None,
+                        listen_data: None,
+                        server_control_addr: Some(format!("{}:{CONTROL_PORT}", end.peer_address)),
+                        server_data_addr: Some(format!("{}:{DATA_PORT}", end.peer_address)),
+                        links: vec![LinkConfig {
+                            id: "fwd".to_string(),
+                            mode: LinkMode::Forward,
+                            listen: Some(format!("127.0.0.1:{FORWARD_LOCAL_PORT}")),
+                            target: None,
+                        }],
+                    };
+                    if !client_config.validate().is_empty() {
+                        return 95;
+                    }
+
+                    let state = Arc::new(SharedState::new(&client_config));
+                    tokio::spawn(client::run(client::Context {
+                        config: Arc::new(client_config),
+                        private_key: Arc::new(client_kp.private),
+                        peer_public_key: Arc::new(server_pub),
+                        state: state.clone(),
+                        socket_path: scratch_socket_path("client"),
+                    }));
+
+                    let Some(mut sock) = connect_with_retry(
+                        &format!("127.0.0.1:{FORWARD_LOCAL_PORT}"),
+                        Duration::from_secs(5),
+                    )
+                    .await
+                    else {
+                        return 96;
+                    };
+
+                    let payload = b"hello-across-real-network-namespaces";
+                    if sock.write_all(payload).await.is_err() {
+                        return 97;
+                    }
+                    if sock.shutdown().await.is_err() {
+                        return 98;
+                    }
+                    let mut received = Vec::new();
+                    if sock.read_to_end(&mut received).await.is_err() {
+                        return 99;
+                    }
+                    if received != payload {
+                        return 100;
+                    }
+
+                    if state.links["fwd"].total_streams.load(Ordering::Relaxed) != 1 {
+                        return 101;
+                    }
+
+                    0
+                })
+            },
+        )
+        .expect("Sandbox::paired().enter should run to completion");
+
+    assert_eq!(a_code, 0, "server side failed (code {a_code})");
+    assert_eq!(b_code, 0, "client side failed (code {b_code})");
+}
