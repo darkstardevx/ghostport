@@ -23,7 +23,7 @@ use gateflow::Sandbox;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 
-use ghostport_core::config::{Config, LinkConfig, LinkMode, Role};
+use ghostport_core::config::{Config, LinkConfig, LinkMode, Role, Transport};
 use ghostport_core::stats::SharedState;
 use ghostport_core::{client, keys, server};
 
@@ -108,11 +108,14 @@ fn forward_link_round_trips_across_real_network_namespaces() {
                         }],
                         listen_control: Some(format!("{}:{CONTROL_PORT}", end.address)),
                         listen_data: Some(format!("{}:{DATA_PORT}", end.address)),
+                        listen_udp: None,
                         server_control_addr: None,
                         server_data_addr: None,
+                        server_udp_addr: None,
                         links: vec![LinkConfig {
                             id: "fwd".to_string(),
                             mode: LinkMode::Forward,
+                            transport: Transport::Tcp,
                             listen: None,
                             target: Some(format!("127.0.0.1:{FORWARD_TARGET_PORT}")),
                         }],
@@ -172,11 +175,14 @@ fn forward_link_round_trips_across_real_network_namespaces() {
                         peers: vec![],
                         listen_control: None,
                         listen_data: None,
+                        listen_udp: None,
                         server_control_addr: Some(format!("{}:{CONTROL_PORT}", end.peer_address)),
                         server_data_addr: Some(format!("{}:{DATA_PORT}", end.peer_address)),
+                        server_udp_addr: None,
                         links: vec![LinkConfig {
                             id: "fwd".to_string(),
                             mode: LinkMode::Forward,
+                            transport: Transport::Tcp,
                             listen: Some(format!("127.0.0.1:{FORWARD_LOCAL_PORT}")),
                             target: None,
                         }],
@@ -276,11 +282,14 @@ fn reverse_link_round_trips_across_real_network_namespaces() {
                         }],
                         listen_control: Some(format!("{}:{CONTROL_PORT}", end.address)),
                         listen_data: Some(format!("{}:{DATA_PORT}", end.address)),
+                        listen_udp: None,
                         server_control_addr: None,
                         server_data_addr: None,
+                        server_udp_addr: None,
                         links: vec![LinkConfig {
                             id: "rev".to_string(),
                             mode: LinkMode::Reverse,
+                            transport: Transport::Tcp,
                             listen: Some(format!("{}:{REVERSE_EXTERNAL_PORT}", end.address)),
                             target: None,
                         }],
@@ -391,11 +400,14 @@ fn reverse_link_round_trips_across_real_network_namespaces() {
                         peers: vec![],
                         listen_control: None,
                         listen_data: None,
+                        listen_udp: None,
                         server_control_addr: Some(format!("{}:{CONTROL_PORT}", end.peer_address)),
                         server_data_addr: Some(format!("{}:{DATA_PORT}", end.peer_address)),
+                        server_udp_addr: None,
                         links: vec![LinkConfig {
                             id: "rev".to_string(),
                             mode: LinkMode::Reverse,
+                            transport: Transport::Tcp,
                             listen: None,
                             target: Some(format!("127.0.0.1:{REVERSE_TARGET_PORT}")),
                         }],

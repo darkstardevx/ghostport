@@ -34,6 +34,25 @@ pub enum LinkMode {
     Reverse,
 }
 
+/// Which transport a link's data actually rides on. Orthogonal to
+/// [`LinkMode`] (direction) — a link is independently "forward or
+/// reverse" and "TCP or UDP". Defaults to `Tcp` (via `#[serde(default)]`
+/// on [`LinkConfig::transport`]) so every config written before this
+/// field existed still parses unchanged.
+#[derive(Debug, Deserialize, Serialize, Clone, Copy, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum Transport {
+    /// A fresh Noise handshake per proxied TCP connection, relayed over
+    /// the shared `listen_data`/`server_data_addr` channel. The
+    /// original, fully-supported transport.
+    #[default]
+    Tcp,
+    /// A Noise session per distinct local UDP flow, relayed over the
+    /// shared `listen_udp`/`server_udp_addr` channel. Forward-mode only
+    /// for now — see `Config::validate`.
+    Udp,
+}
+
 /// A single allowed client identity, server-role only. Multiple peers
 /// can be pinned at once; each is independently restricted to its own
 /// subset of `links` rather than trusted for everything the server
@@ -61,6 +80,11 @@ pub struct LinkConfig {
     /// Forward or reverse — determines which side needs `listen` vs
     /// `target`, per [`Config::link_needs_listen`].
     pub mode: LinkMode,
+    /// TCP or UDP — which shared channel this link's data actually
+    /// rides on. Defaults to [`Transport::Tcp`] for configs written
+    /// before this field existed.
+    #[serde(default)]
+    pub transport: Transport,
     /// Present on whichever side accepts the "real" connections for this
     /// link (local apps for `forward`, external clients for `reverse`).
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -106,6 +130,12 @@ pub struct Config {
     /// Address the data channel listens on. Server-role only.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub listen_data: Option<String>,
+    /// Address the shared UDP channel listens on — every `transport =
+    /// "udp"` link's Noise sessions multiplex over this one socket, the
+    /// same way every TCP link multiplexes over `listen_data`. Required
+    /// only when at least one link uses UDP. Server-role only.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub listen_udp: Option<String>,
 
     // Client-role fields.
     /// Address of the server's control channel to dial. Client-role
@@ -115,6 +145,10 @@ pub struct Config {
     /// Address of the server's data channel to dial. Client-role only.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub server_data_addr: Option<String>,
+    /// Address of the server's shared UDP channel to dial. Required
+    /// only when at least one link uses UDP. Client-role only.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub server_udp_addr: Option<String>,
 
     /// Every forwarded port this role knows about. Both peers need a
     /// matching entry (same `id`) for a link to actually work.
@@ -250,7 +284,62 @@ impl Config {
             self.validate_link(link, &mut errors);
         }
 
+        self.validate_udp(&mut errors);
+
         errors
+    }
+
+    /// UDP-specific rules, checked separately from [`Self::validate_link`]
+    /// since they span the whole link list (whether *any* link needs the
+    /// shared UDP channel) rather than one link in isolation.
+    fn validate_udp(&self, errors: &mut Vec<String>) {
+        for link in &self.links {
+            if link.transport == Transport::Udp && link.mode == LinkMode::Reverse {
+                errors.push(format!(
+                    "link \"{}\": reverse-mode UDP links aren't supported yet",
+                    link.id
+                ));
+            }
+        }
+
+        let any_udp_link = self.links.iter().any(|l| l.transport == Transport::Udp);
+
+        match self.role {
+            Role::Server => {
+                if any_udp_link {
+                    require_present(
+                        errors,
+                        "listen_udp",
+                        &self.listen_udp,
+                        "a link uses transport = \"udp\"",
+                    );
+                } else {
+                    require_absent(
+                        errors,
+                        "listen_udp",
+                        &self.listen_udp,
+                        "no link uses transport = \"udp\"",
+                    );
+                }
+            }
+            Role::Client => {
+                if any_udp_link {
+                    require_present(
+                        errors,
+                        "server_udp_addr",
+                        &self.server_udp_addr,
+                        "a link uses transport = \"udp\"",
+                    );
+                } else {
+                    require_absent(
+                        errors,
+                        "server_udp_addr",
+                        &self.server_udp_addr,
+                        "no link uses transport = \"udp\"",
+                    );
+                }
+            }
+        }
     }
 
     /// Each peer's own fields, plus cross-peer checks (duplicate name/
@@ -353,8 +442,10 @@ mod tests {
             }],
             listen_control: Some("0.0.0.0:9000".to_string()),
             listen_data: Some("0.0.0.0:9001".to_string()),
+            listen_udp: None,
             server_control_addr: None,
             server_data_addr: None,
+            server_udp_addr: None,
             links: Vec::new(),
         }
     }
@@ -369,8 +460,10 @@ mod tests {
             peers: Vec::new(),
             listen_control: None,
             listen_data: None,
+            listen_udp: None,
             server_control_addr: Some("example.com:9000".to_string()),
             server_data_addr: Some("example.com:9001".to_string()),
+            server_udp_addr: None,
             links: Vec::new(),
         }
     }
@@ -500,6 +593,7 @@ mod tests {
         cfg.links.push(LinkConfig {
             id: "db".to_string(),
             mode: LinkMode::Forward,
+            transport: Transport::Tcp,
             listen: None,
             target: Some("127.0.0.1:5432".to_string()),
         });
@@ -547,6 +641,7 @@ mod tests {
         cfg.links.push(LinkConfig {
             id: "db".to_string(),
             mode: LinkMode::Forward,
+            transport: Transport::Tcp,
             listen: None,
             target: Some("127.0.0.1:5432".to_string()),
         });
@@ -567,6 +662,7 @@ mod tests {
         cfg.links.push(LinkConfig {
             id: "db".to_string(),
             mode: LinkMode::Forward,
+            transport: Transport::Tcp,
             listen: Some("0.0.0.0:5432".to_string()),
             target: None,
         });
@@ -587,6 +683,7 @@ mod tests {
         server.links.push(LinkConfig {
             id: "dev".to_string(),
             mode: LinkMode::Reverse,
+            transport: Transport::Tcp,
             listen: Some("0.0.0.0:8080".to_string()),
             target: None,
         });
@@ -596,6 +693,7 @@ mod tests {
         client.links.push(LinkConfig {
             id: "dev".to_string(),
             mode: LinkMode::Reverse,
+            transport: Transport::Tcp,
             listen: None,
             target: Some("127.0.0.1:3000".to_string()),
         });
@@ -608,6 +706,7 @@ mod tests {
         server.links.push(LinkConfig {
             id: "db".to_string(),
             mode: LinkMode::Forward,
+            transport: Transport::Tcp,
             listen: None,
             target: Some("127.0.0.1:5432".to_string()),
         });
@@ -617,6 +716,7 @@ mod tests {
         client.links.push(LinkConfig {
             id: "db".to_string(),
             mode: LinkMode::Forward,
+            transport: Transport::Tcp,
             listen: Some("127.0.0.1:5432".to_string()),
             target: None,
         });
@@ -629,12 +729,14 @@ mod tests {
         cfg.links.push(LinkConfig {
             id: "dup".to_string(),
             mode: LinkMode::Forward,
+            transport: Transport::Tcp,
             listen: None,
             target: Some("127.0.0.1:1".to_string()),
         });
         cfg.links.push(LinkConfig {
             id: "dup".to_string(),
             mode: LinkMode::Forward,
+            transport: Transport::Tcp,
             listen: None,
             target: Some("127.0.0.1:2".to_string()),
         });
@@ -651,6 +753,7 @@ mod tests {
         cfg.links.push(LinkConfig {
             id: "bad".to_string(),
             mode: LinkMode::Forward,
+            transport: Transport::Tcp,
             listen: None,
             target: Some("not-an-address".to_string()),
         });
@@ -667,6 +770,7 @@ mod tests {
         cfg.links.push(LinkConfig {
             id: "db".to_string(),
             mode: LinkMode::Forward,
+            transport: Transport::Tcp,
             listen: None,
             target: Some("127.0.0.1:5432".to_string()),
         });
@@ -690,6 +794,7 @@ mod tests {
         cfg.links.push(LinkConfig {
             id: "db".to_string(),
             mode: LinkMode::Forward,
+            transport: Transport::Tcp,
             listen: None,
             target: Some("127.0.0.1:5432".to_string()),
         });
@@ -723,5 +828,97 @@ mod tests {
         assert!(!client.link_needs_listen(LinkMode::Reverse)); // client + reverse -> target
         assert!(!server.link_needs_listen(LinkMode::Forward)); // server + forward -> target
         assert!(server.link_needs_listen(LinkMode::Reverse)); // server + reverse -> listen
+    }
+
+    #[test]
+    fn reverse_mode_udp_link_is_rejected() {
+        let mut server = base_server();
+        server.listen_udp = Some("0.0.0.0:9002".to_string());
+        server.links.push(LinkConfig {
+            id: "udp-rev".to_string(),
+            mode: LinkMode::Reverse,
+            transport: Transport::Udp,
+            listen: Some("0.0.0.0:5300".to_string()),
+            target: None,
+        });
+        let errors = server.validate();
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.contains("reverse-mode UDP") && e.contains("udp-rev")),
+            "{errors:?}"
+        );
+    }
+
+    #[test]
+    fn forward_mode_udp_link_requires_listen_udp_on_server() {
+        let mut server = base_server();
+        server.links.push(LinkConfig {
+            id: "dns".to_string(),
+            mode: LinkMode::Forward,
+            transport: Transport::Udp,
+            listen: None,
+            target: Some("127.0.0.1:53".to_string()),
+        });
+        let errors = server.validate();
+        assert!(
+            errors.iter().any(|e| e.contains("listen_udp")),
+            "{errors:?}"
+        );
+    }
+
+    #[test]
+    fn forward_mode_udp_link_requires_server_udp_addr_on_client() {
+        let mut client = base_client();
+        client.links.push(LinkConfig {
+            id: "dns".to_string(),
+            mode: LinkMode::Forward,
+            transport: Transport::Udp,
+            listen: Some("127.0.0.1:5300".to_string()),
+            target: None,
+        });
+        let errors = client.validate();
+        assert!(
+            errors.iter().any(|e| e.contains("server_udp_addr")),
+            "{errors:?}"
+        );
+    }
+
+    #[test]
+    fn listen_udp_is_rejected_when_no_link_actually_uses_udp() {
+        let mut server = base_server();
+        server.listen_udp = Some("0.0.0.0:9002".to_string());
+        let errors = server.validate();
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.contains("listen_udp") && e.contains("must not be set")),
+            "{errors:?}"
+        );
+    }
+
+    #[test]
+    fn correctly_configured_forward_udp_link_passes_on_both_sides() {
+        let mut server = base_server();
+        server.listen_udp = Some("0.0.0.0:9002".to_string());
+        server.links.push(LinkConfig {
+            id: "dns".to_string(),
+            mode: LinkMode::Forward,
+            transport: Transport::Udp,
+            listen: None,
+            target: Some("127.0.0.1:53".to_string()),
+        });
+        assert!(server.validate().is_empty(), "{:?}", server.validate());
+
+        let mut client = base_client();
+        client.server_udp_addr = Some("example.com:9002".to_string());
+        client.links.push(LinkConfig {
+            id: "dns".to_string(),
+            mode: LinkMode::Forward,
+            transport: Transport::Udp,
+            listen: Some("127.0.0.1:5300".to_string()),
+            target: None,
+        });
+        assert!(client.validate().is_empty(), "{:?}", client.validate());
     }
 }

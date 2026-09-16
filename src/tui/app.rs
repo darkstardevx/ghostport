@@ -14,7 +14,7 @@
 //! workflow is edit -> save -> restart.
 
 use crate::tui::templates;
-use ghostport_core::config::{Config, LinkConfig, LinkMode, PeerConfig, Role};
+use ghostport_core::config::{Config, LinkConfig, LinkMode, PeerConfig, Role, Transport};
 use ghostport_core::keys;
 use ghostport_core::stats::StatusSnapshot;
 use std::path::PathBuf;
@@ -388,6 +388,7 @@ impl App {
             LinkConfig {
                 id: id.clone(),
                 mode,
+                transport: Transport::Tcp,
                 listen: Some(addr),
                 target: None,
             }
@@ -395,6 +396,7 @@ impl App {
             LinkConfig {
                 id: id.clone(),
                 mode,
+                transport: Transport::Tcp,
                 listen: None,
                 target: Some(addr),
             }
@@ -720,8 +722,10 @@ mod tests {
             peers: vec![],
             listen_control: None,
             listen_data: None,
+            listen_udp: None,
             server_control_addr: Some("example.com:9000".to_string()),
             server_data_addr: Some("example.com:9001".to_string()),
+            server_udp_addr: None,
             links: vec![],
         };
         std::fs::write(path, toml::to_string(&cfg).unwrap()).unwrap();
@@ -738,18 +742,22 @@ mod tests {
             peers: vec![],
             listen_control: Some("0.0.0.0:9000".to_string()),
             listen_data: Some("0.0.0.0:9001".to_string()),
+            listen_udp: None,
             server_control_addr: None,
             server_data_addr: None,
+            server_udp_addr: None,
             links: vec![
                 LinkConfig {
                     id: "db".to_string(),
                     mode: LinkMode::Forward,
+                    transport: Transport::Tcp,
                     listen: None,
                     target: Some("127.0.0.1:5432".to_string()),
                 },
                 LinkConfig {
                     id: "dev".to_string(),
                     mode: LinkMode::Reverse,
+                    transport: Transport::Tcp,
                     listen: Some("0.0.0.0:8080".to_string()),
                     target: None,
                 },
@@ -822,6 +830,7 @@ mod tests {
         app.config.links.push(LinkConfig {
             id: "db".to_string(),
             mode: LinkMode::Reverse,
+            transport: Transport::Tcp,
             listen: None,
             target: Some("old".to_string()),
         });
@@ -851,6 +860,7 @@ mod tests {
         app.config.links.push(LinkConfig {
             id: "db".to_string(),
             mode: LinkMode::Forward,
+            transport: Transport::Tcp,
             listen: Some("127.0.0.1:5432".to_string()),
             target: None,
         });
@@ -895,6 +905,7 @@ mod tests {
         app.config.links.push(LinkConfig {
             id: "old-name".to_string(),
             mode: LinkMode::Forward,
+            transport: Transport::Tcp,
             listen: Some("127.0.0.1:1".to_string()),
             target: None,
         });
@@ -947,12 +958,14 @@ mod tests {
         app.config.links.push(LinkConfig {
             id: "a".to_string(),
             mode: LinkMode::Forward,
+            transport: Transport::Tcp,
             listen: Some("x".to_string()),
             target: None,
         });
         app.config.links.push(LinkConfig {
             id: "b".to_string(),
             mode: LinkMode::Forward,
+            transport: Transport::Tcp,
             listen: Some("y".to_string()),
             target: None,
         });
@@ -1369,8 +1382,10 @@ mod tests {
             peers: vec![],
             listen_control: Some("0.0.0.0:9000".to_string()),
             listen_data: Some("0.0.0.0:9001".to_string()),
+            listen_udp: None,
             server_control_addr: None,
             server_data_addr: None,
+            server_udp_addr: None,
             links: vec![], // no links defined at all
         };
         std::fs::write(&path, toml::to_string(&cfg).unwrap()).unwrap();

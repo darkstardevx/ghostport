@@ -5,7 +5,7 @@
 //! that fulfill a `reverse`-mode link (dialed in response to the
 //! server's `OpenStream` signal, not accepted directly).
 
-use crate::config::{Config, LinkMode};
+use crate::config::{Config, LinkMode, Transport};
 use crate::protocol::{ControlMessage, StreamHello};
 use crate::stats::SharedState;
 use crate::{framing, ipc, noise, relay, theme};
@@ -53,6 +53,12 @@ pub async fn run(ctx: Context) -> std::io::Result<()> {
     ));
 
     for link in &ctx.config.links {
+        if link.transport != Transport::Tcp {
+            // Not this loop's concern — a UDP-transport link is handled
+            // entirely by whatever plugin crate wires in UDP support
+            // (see `ghostport-udp`), over its own shared UDP channel.
+            continue;
+        }
         if link.mode == LinkMode::Forward {
             let listen_addr = link
                 .listen

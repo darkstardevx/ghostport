@@ -8,7 +8,7 @@
 //! peer pair) — the accept loop below handles one session fully before
 //! accepting the next, rather than juggling concurrent sessions.
 
-use crate::config::{Config, LinkMode};
+use crate::config::{Config, LinkMode, Transport};
 use crate::peermatch::{self, ResolvedPeer};
 use crate::protocol::{ControlMessage, StreamHello};
 use crate::ratelimit::HandshakeLimiter;
@@ -82,6 +82,13 @@ pub async fn run(ctx: Context) -> std::io::Result<()> {
     let limiter = HandshakeLimiter::new();
 
     for link in &ctx.config.links {
+        if link.transport != Transport::Tcp {
+            // Not this loop's concern — see the matching comment in
+            // client.rs. UDP forward links need no per-link listener
+            // here at all (the server side of a forward link only ever
+            // dials `target`, on an already-accepted data connection).
+            continue;
+        }
         if link.mode == LinkMode::Reverse {
             let listen_addr = link
                 .listen
@@ -452,6 +459,13 @@ async fn handle_data_connection(
             hello.link_id
         )));
     };
+
+    if link.transport != Transport::Tcp {
+        return Err(std::io::Error::other(format!(
+            "link \"{}\" isn't a TCP link (nothing should ever dial the TCP data channel for it)",
+            link.id
+        )));
+    }
 
     let stats = ctx
         .state

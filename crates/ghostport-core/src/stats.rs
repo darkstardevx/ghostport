@@ -189,7 +189,7 @@ pub struct StatusSnapshot {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::{LinkConfig, LinkMode};
+    use crate::config::{LinkConfig, LinkMode, Transport};
     use std::path::PathBuf;
     use std::sync::atomic::Ordering::Relaxed;
 
@@ -201,11 +201,14 @@ mod tests {
             peers: vec![],
             listen_control: Some("0.0.0.0:9000".to_string()),
             listen_data: Some("0.0.0.0:9001".to_string()),
+            listen_udp: None,
             server_control_addr: None,
             server_data_addr: None,
+            server_udp_addr: None,
             links: vec![LinkConfig {
                 id: "fwd".to_string(),
                 mode: LinkMode::Forward,
+                transport: Transport::Tcp,
                 listen: None,
                 target: Some("127.0.0.1:1".to_string()),
             }],
@@ -272,6 +275,7 @@ mod tests {
         cfg.links.push(LinkConfig {
             id: "not-in-state".to_string(),
             mode: LinkMode::Forward,
+            transport: Transport::Tcp,
             listen: None,
             target: Some("127.0.0.1:2".to_string()),
         });

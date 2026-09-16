@@ -16,7 +16,7 @@
 //! extracting the library left the API genuinely usable from outside
 //! the crate, not just technically `pub`.
 
-use ghostport_core::config::{Config, LinkConfig, LinkMode, PeerConfig, Role};
+use ghostport_core::config::{Config, LinkConfig, LinkMode, PeerConfig, Role, Transport};
 use ghostport_core::{client, framing, keys, noise, peermatch, protocol, ratelimit, server, stats};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -113,18 +113,22 @@ async fn forward_and_reverse_links_round_trip_end_to_end() {
         }],
         listen_control: Some(format!("127.0.0.1:{control_port}")),
         listen_data: Some(format!("127.0.0.1:{data_port}")),
+        listen_udp: None,
         server_control_addr: None,
         server_data_addr: None,
+        server_udp_addr: None,
         links: vec![
             LinkConfig {
                 id: "fwd".to_string(),
                 mode: LinkMode::Forward,
+                transport: Transport::Tcp,
                 listen: None,
                 target: Some(format!("127.0.0.1:{forward_target_port}")),
             },
             LinkConfig {
                 id: "rev".to_string(),
                 mode: LinkMode::Reverse,
+                transport: Transport::Tcp,
                 listen: Some(format!("127.0.0.1:{reverse_external_port}")),
                 target: None,
             },
@@ -143,18 +147,22 @@ async fn forward_and_reverse_links_round_trip_end_to_end() {
         peers: vec![],
         listen_control: None,
         listen_data: None,
+        listen_udp: None,
         server_control_addr: Some(format!("127.0.0.1:{control_port}")),
         server_data_addr: Some(format!("127.0.0.1:{data_port}")),
+        server_udp_addr: None,
         links: vec![
             LinkConfig {
                 id: "fwd".to_string(),
                 mode: LinkMode::Forward,
+                transport: Transport::Tcp,
                 listen: Some(format!("127.0.0.1:{forward_local_port}")),
                 target: None,
             },
             LinkConfig {
                 id: "rev".to_string(),
                 mode: LinkMode::Reverse,
+                transport: Transport::Tcp,
                 listen: None,
                 target: Some(format!("127.0.0.1:{reverse_target_port}")),
             },
@@ -257,8 +265,10 @@ async fn wrong_peer_key_fails_the_handshake_instead_of_connecting() {
         ],
         listen_control: Some(format!("127.0.0.1:{control_port}")),
         listen_data: Some(format!("127.0.0.1:{data_port}")),
+        listen_udp: None,
         server_control_addr: None,
         server_data_addr: None,
+        server_udp_addr: None,
         links: vec![],
     };
     let state = Arc::new(stats::SharedState::new(&server_config));
@@ -336,8 +346,10 @@ async fn control_listener_rejects_connections_beyond_the_per_ip_rate_limit() {
         }],
         listen_control: Some(format!("127.0.0.1:{control_port}")),
         listen_data: Some(format!("127.0.0.1:{data_port}")),
+        listen_udp: None,
         server_control_addr: None,
         server_data_addr: None,
+        server_udp_addr: None,
         links: vec![],
     };
     let state = Arc::new(stats::SharedState::new(&server_config));
@@ -425,18 +437,22 @@ async fn peer_is_rejected_from_a_link_outside_its_own_allowlist() {
         ],
         listen_control: Some(format!("127.0.0.1:{control_port}")),
         listen_data: Some(format!("127.0.0.1:{data_port}")),
+        listen_udp: None,
         server_control_addr: None,
         server_data_addr: None,
+        server_udp_addr: None,
         links: vec![
             LinkConfig {
                 id: "link-a".to_string(),
                 mode: LinkMode::Forward,
+                transport: Transport::Tcp,
                 listen: None,
                 target: Some(format!("127.0.0.1:{link_a_target_port}")),
             },
             LinkConfig {
                 id: "link-b".to_string(),
                 mode: LinkMode::Forward,
+                transport: Transport::Tcp,
                 listen: None,
                 target: Some(format!("127.0.0.1:{link_b_target_port}")),
             },
@@ -480,11 +496,14 @@ async fn peer_is_rejected_from_a_link_outside_its_own_allowlist() {
         peers: vec![],
         listen_control: None,
         listen_data: None,
+        listen_udp: None,
         server_control_addr: Some(format!("127.0.0.1:{control_port}")),
         server_data_addr: Some(format!("127.0.0.1:{data_port}")),
+        server_udp_addr: None,
         links: vec![LinkConfig {
             id: "link-a".to_string(),
             mode: LinkMode::Forward,
+            transport: Transport::Tcp,
             listen: Some(format!("127.0.0.1:{client_a_local_port}")),
             target: None,
         }],

@@ -113,8 +113,10 @@ mod tests {
             peers: vec![],
             listen_control: Some("0.0.0.0:9000".to_string()),
             listen_data: Some("0.0.0.0:9001".to_string()),
+            listen_udp: None,
             server_control_addr: None,
             server_data_addr: None,
+            server_udp_addr: None,
             links: vec![],
         }
     }
