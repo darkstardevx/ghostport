@@ -64,7 +64,10 @@ impl ControlStatus {
 }
 
 fn now_unix() -> u64 {
-    SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
 }
 
 pub struct SharedState {
@@ -76,8 +79,17 @@ pub struct SharedState {
 
 impl SharedState {
     pub fn new(config: &Config) -> Self {
-        let links = config.links.iter().map(|l| (l.id.clone(), LinkStats::default())).collect();
-        Self { role: config.role, started_at: now_unix(), control: ControlStatus::default(), links }
+        let links = config
+            .links
+            .iter()
+            .map(|l| (l.id.clone(), LinkStats::default()))
+            .collect();
+        Self {
+            role: config.role,
+            started_at: now_unix(),
+            control: ControlStatus::default(),
+            links,
+        }
     }
 
     pub fn snapshot(&self, config: &Config) -> StatusSnapshot {
@@ -98,7 +110,11 @@ impl SharedState {
             links: config
                 .links
                 .iter()
-                .filter_map(|l| self.links.get(&l.id).map(|stats| stats.snapshot(&l.id, &format!("{:?}", l.mode).to_lowercase())))
+                .filter_map(|l| {
+                    self.links
+                        .get(&l.id)
+                        .map(|stats| stats.snapshot(&l.id, &format!("{:?}", l.mode).to_lowercase()))
+                })
                 .collect(),
         }
     }
@@ -142,7 +158,12 @@ mod tests {
             listen_data: Some("0.0.0.0:9001".to_string()),
             server_control_addr: None,
             server_data_addr: None,
-            links: vec![LinkConfig { id: "fwd".to_string(), mode: LinkMode::Forward, listen: None, target: Some("127.0.0.1:1".to_string()) }],
+            links: vec![LinkConfig {
+                id: "fwd".to_string(),
+                mode: LinkMode::Forward,
+                listen: None,
+                target: Some("127.0.0.1:1".to_string()),
+            }],
         }
     }
 
@@ -180,7 +201,9 @@ mod tests {
         let cfg = sample_config();
         let state = SharedState::new(&cfg);
 
-        state.control.set_connected("1.2.3.4:5678".to_string(), Some("alice".to_string()));
+        state
+            .control
+            .set_connected("1.2.3.4:5678".to_string(), Some("alice".to_string()));
         let snap = state.snapshot(&cfg);
         assert!(snap.control_connected);
         assert_eq!(snap.control_peer_addr.as_deref(), Some("1.2.3.4:5678"));
@@ -201,7 +224,12 @@ mod tests {
         // happen in practice since both are built from the same config),
         // snapshot must not panic.
         let mut cfg = sample_config();
-        cfg.links.push(LinkConfig { id: "not-in-state".to_string(), mode: LinkMode::Forward, listen: None, target: Some("127.0.0.1:2".to_string()) });
+        cfg.links.push(LinkConfig {
+            id: "not-in-state".to_string(),
+            mode: LinkMode::Forward,
+            listen: None,
+            target: Some("127.0.0.1:2".to_string()),
+        });
         let state = SharedState::new(&sample_config()); // state built from the config WITHOUT the extra link
         let snap = state.snapshot(&cfg);
         assert_eq!(snap.links.len(), 1);

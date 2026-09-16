@@ -21,10 +21,17 @@ pub struct Keypair {
 }
 
 pub fn generate() -> Keypair {
-    let kp = snow::Builder::new(PATTERN.parse().expect("PATTERN is a valid Noise pattern string"))
-        .generate_keypair()
-        .expect("keypair generation only fails on RNG failure");
-    Keypair { private: kp.private, public: kp.public }
+    let kp = snow::Builder::new(
+        PATTERN
+            .parse()
+            .expect("PATTERN is a valid Noise pattern string"),
+    )
+    .generate_keypair()
+    .expect("keypair generation only fails on RNG failure");
+    Keypair {
+        private: kp.private,
+        public: kp.public,
+    }
 }
 
 /// The conventional public-key sibling path for a given private-key path
@@ -61,8 +68,10 @@ fn write_base64_line(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
 }
 
 pub fn load_private_key(path: &Path) -> Result<Vec<u8>, String> {
-    let text = std::fs::read_to_string(path).map_err(|e| format!("failed to read {}: {e}", path.display()))?;
-    decode_public_key(text.trim()).map_err(|e| format!("{} does not contain a valid key: {e}", path.display()))
+    let text = std::fs::read_to_string(path)
+        .map_err(|e| format!("failed to read {}: {e}", path.display()))?;
+    decode_public_key(text.trim())
+        .map_err(|e| format!("{} does not contain a valid key: {e}", path.display()))
 }
 
 pub fn encode_public_key(public: &[u8]) -> String {
@@ -88,7 +97,11 @@ pub fn decode_public_key(s: &str) -> Result<Vec<u8>, String> {
 /// failure. This gives both sides something concrete to actually check.
 pub fn fingerprint(public_key: &[u8]) -> String {
     let digest = Sha256::digest(public_key);
-    digest.iter().map(|b| format!("{b:02x}")).collect::<Vec<_>>().join(":")
+    digest
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect::<Vec<_>>()
+        .join(":")
 }
 
 fn base64_encode(bytes: &[u8]) -> String {
@@ -106,7 +119,8 @@ mod tests {
     use super::*;
 
     fn scratch_path(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("ghostport-keys-test-{name}-{}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("ghostport-keys-test-{name}-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         dir.join("identity.key")
     }
@@ -185,7 +199,11 @@ mod tests {
         let kp = generate();
         let fp = fingerprint(&kp.public);
         let groups: Vec<&str> = fp.split(':').collect();
-        assert_eq!(groups.len(), 32, "SHA-256 digest is 32 bytes, one hex pair per group");
+        assert_eq!(
+            groups.len(),
+            32,
+            "SHA-256 digest is 32 bytes, one hex pair per group"
+        );
         for group in groups {
             assert_eq!(group.len(), 2);
             assert!(group.chars().all(|c| c.is_ascii_hexdigit()));

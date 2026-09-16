@@ -56,8 +56,16 @@ pub struct Context {
 }
 
 pub async fn run(ctx: Context) -> std::io::Result<()> {
-    let listen_control = ctx.config.listen_control.clone().expect("validated: server role requires listen_control");
-    let listen_data = ctx.config.listen_data.clone().expect("validated: server role requires listen_data");
+    let listen_control = ctx
+        .config
+        .listen_control
+        .clone()
+        .expect("validated: server role requires listen_control");
+    let listen_data = ctx
+        .config
+        .listen_data
+        .clone()
+        .expect("validated: server role requires listen_data");
 
     let pending: PendingStreams = Arc::new(Mutex::new(HashMap::new()));
     let next_stream_id = Arc::new(AtomicU64::new(1));
@@ -66,12 +74,25 @@ pub async fn run(ctx: Context) -> std::io::Result<()> {
 
     for link in &ctx.config.links {
         if link.mode == LinkMode::Reverse {
-            let listen_addr = link.listen.clone().expect("validated: reverse link on server requires listen");
-            tokio::spawn(spawn_reverse_listener(link.id.clone(), listen_addr, pending.clone(), next_stream_id.clone(), open_stream_tx.clone()));
+            let listen_addr = link
+                .listen
+                .clone()
+                .expect("validated: reverse link on server requires listen");
+            tokio::spawn(spawn_reverse_listener(
+                link.id.clone(),
+                listen_addr,
+                pending.clone(),
+                next_stream_id.clone(),
+                open_stream_tx.clone(),
+            ));
         }
     }
 
-    let ipc_task = tokio::spawn(ipc::run_ipc_server(ctx.state.clone(), ctx.config.clone(), ctx.socket_path.clone()));
+    let ipc_task = tokio::spawn(ipc::run_ipc_server(
+        ctx.state.clone(),
+        ctx.config.clone(),
+        ctx.socket_path.clone(),
+    ));
 
     let ctx_data = Arc::new(ctx);
     let ctx_control = ctx_data.clone();
@@ -79,39 +100,74 @@ pub async fn run(ctx: Context) -> std::io::Result<()> {
 
     let control_limiter = limiter.clone();
     let data_limiter = limiter;
-    let control_task = tokio::spawn(async move { run_control_accept_loop(ctx_control, listen_control, open_stream_rx, control_limiter).await });
-    let data_task = tokio::spawn(async move { run_data_accept_loop(ctx_data, listen_data, pending_data, data_limiter).await });
+    let control_task = tokio::spawn(async move {
+        run_control_accept_loop(ctx_control, listen_control, open_stream_rx, control_limiter).await
+    });
+    let data_task = tokio::spawn(async move {
+        run_data_accept_loop(ctx_data, listen_data, pending_data, data_limiter).await
+    });
 
     let _ = tokio::join!(control_task, data_task, ipc_task);
     Ok(())
 }
 
-async fn spawn_reverse_listener(link_id: String, listen_addr: String, pending: PendingStreams, next_stream_id: Arc<AtomicU64>, open_stream_tx: mpsc::Sender<ControlMessage>) {
+async fn spawn_reverse_listener(
+    link_id: String,
+    listen_addr: String,
+    pending: PendingStreams,
+    next_stream_id: Arc<AtomicU64>,
+    open_stream_tx: mpsc::Sender<ControlMessage>,
+) {
     let listener = match TcpListener::bind(&listen_addr).await {
         Ok(l) => l,
         Err(e) => {
-            eprintln!("ghostport: [{}] {}", theme::accent(&link_id), theme::err(&format!("failed to bind {listen_addr}: {e}")));
+            eprintln!(
+                "ghostport: [{}] {}",
+                theme::accent(&link_id),
+                theme::err(&format!("failed to bind {listen_addr}: {e}"))
+            );
             return;
         }
     };
-    println!("ghostport: [{}] {}", theme::accent(&link_id), theme::ok(&format!("listening on {listen_addr} (reverse)")));
+    println!(
+        "ghostport: [{}] {}",
+        theme::accent(&link_id),
+        theme::ok(&format!("listening on {listen_addr} (reverse)"))
+    );
 
     loop {
         let (external_conn, peer_addr) = match listener.accept().await {
             Ok(v) => v,
             Err(e) => {
-                eprintln!("ghostport: [{}] {}", theme::accent(&link_id), theme::err(&format!("accept failed: {e}")));
+                eprintln!(
+                    "ghostport: [{}] {}",
+                    theme::accent(&link_id),
+                    theme::err(&format!("accept failed: {e}"))
+                );
                 continue;
             }
         };
         let stream_id = next_stream_id.fetch_add(1, Ordering::Relaxed);
         pending.lock().await.insert(stream_id, external_conn);
 
-        if open_stream_tx.send(ControlMessage::OpenStream { link_id: link_id.clone(), stream_id }).await.is_err() {
+        if open_stream_tx
+            .send(ControlMessage::OpenStream {
+                link_id: link_id.clone(),
+                stream_id,
+            })
+            .await
+            .is_err()
+        {
             // No control session has ever connected (channel closed only
             // if the accept loop itself is gone) — nothing to do but drop.
             pending.lock().await.remove(&stream_id);
-            eprintln!("ghostport: [{}] {}", theme::accent(&link_id), theme::warn(&format!("{peer_addr}: control channel unavailable, dropping")));
+            eprintln!(
+                "ghostport: [{}] {}",
+                theme::accent(&link_id),
+                theme::warn(&format!(
+                    "{peer_addr}: control channel unavailable, dropping"
+                ))
+            );
             continue;
         }
 
@@ -120,7 +176,13 @@ async fn spawn_reverse_listener(link_id: String, listen_addr: String, pending: P
         tokio::spawn(async move {
             tokio::time::sleep(Duration::from_secs(10)).await;
             if pending_cleanup.lock().await.remove(&stream_id).is_some() {
-                eprintln!("ghostport: [{}] {}", theme::accent(&link_id_cleanup), theme::warn(&format!("stream {stream_id} timed out waiting for the client to respond (offline?)")));
+                eprintln!(
+                    "ghostport: [{}] {}",
+                    theme::accent(&link_id_cleanup),
+                    theme::warn(&format!(
+                        "stream {stream_id} timed out waiting for the client to respond (offline?)"
+                    ))
+                );
             }
         });
     }
@@ -131,15 +193,28 @@ async fn spawn_reverse_listener(link_id: String, listen_addr: String, pending: P
 /// configured peer it matched.
 type AuthenticatedControlConn = (NoiseStream<TcpStream>, std::net::SocketAddr, String);
 
-async fn run_control_accept_loop(ctx: Arc<Context>, listen_addr: String, mut open_stream_rx: mpsc::Receiver<ControlMessage>, limiter: Arc<HandshakeLimiter>) {
+async fn run_control_accept_loop(
+    ctx: Arc<Context>,
+    listen_addr: String,
+    mut open_stream_rx: mpsc::Receiver<ControlMessage>,
+    limiter: Arc<HandshakeLimiter>,
+) {
     let listener = match TcpListener::bind(&listen_addr).await {
         Ok(l) => l,
         Err(e) => {
-            eprintln!("ghostport: {}", theme::err(&format!("fatal: failed to bind control listener {listen_addr}: {e}")));
+            eprintln!(
+                "ghostport: {}",
+                theme::err(&format!(
+                    "fatal: failed to bind control listener {listen_addr}: {e}"
+                ))
+            );
             return;
         }
     };
-    println!("ghostport: {}", theme::ok(&format!("control channel listening on {listen_addr}")));
+    println!(
+        "ghostport: {}",
+        theme::ok(&format!("control channel listening on {listen_addr}"))
+    );
 
     // Accepting and handshaking happen in their own spawned task per
     // connection rather than inline in this loop -- a connection that
@@ -160,13 +235,21 @@ async fn run_control_accept_loop(ctx: Arc<Context>, listen_addr: String, mut ope
             let (tcp, peer_addr) = match listener.accept().await {
                 Ok(v) => v,
                 Err(e) => {
-                    eprintln!("ghostport: {}", theme::err(&format!("control accept failed: {e}")));
+                    eprintln!(
+                        "ghostport: {}",
+                        theme::err(&format!("control accept failed: {e}"))
+                    );
                     continue;
                 }
             };
 
             let Some(permit) = limiter.try_acquire(peer_addr.ip()).await else {
-                eprintln!("ghostport: {}", theme::warn(&format!("control: rejected {peer_addr} (too many recent handshake attempts)")));
+                eprintln!(
+                    "ghostport: {}",
+                    theme::warn(&format!(
+                        "control: rejected {peer_addr} (too many recent handshake attempts)"
+                    ))
+                );
                 continue;
             };
 
@@ -176,21 +259,33 @@ async fn run_control_accept_loop(ctx: Arc<Context>, listen_addr: String, mut ope
             tokio::spawn(async move {
                 let mut tcp = tcp;
                 let result = tokio::time::timeout(HANDSHAKE_TIMEOUT, async {
-                    let (peer_index, state) = peermatch::match_peer(&mut tcp, &private_key, &peers).await.map_err(|e| e.to_string())?;
-                    let stream = NoiseStream::handshake(tcp, state).await.map_err(|e| e.to_string())?;
+                    let (peer_index, state) = peermatch::match_peer(&mut tcp, &private_key, &peers)
+                        .await
+                        .map_err(|e| e.to_string())?;
+                    let stream = NoiseStream::handshake(tcp, state)
+                        .await
+                        .map_err(|e| e.to_string())?;
                     Ok::<_, String>((stream, peer_index))
                 })
                 .await;
                 drop(permit);
                 match result {
                     Ok(Ok((stream, peer_index))) => {
-                        let _ = authenticated_tx.send((stream, peer_addr, peers[peer_index].name.clone())).await;
+                        let _ = authenticated_tx
+                            .send((stream, peer_addr, peers[peer_index].name.clone()))
+                            .await;
                     }
                     Ok(Err(e)) => {
-                        eprintln!("ghostport: {}", theme::err(&format!("control: handshake with {peer_addr} failed: {e}")));
+                        eprintln!(
+                            "ghostport: {}",
+                            theme::err(&format!("control: handshake with {peer_addr} failed: {e}"))
+                        );
                     }
                     Err(_) => {
-                        eprintln!("ghostport: {}", theme::warn(&format!("control: handshake with {peer_addr} timed out")));
+                        eprintln!(
+                            "ghostport: {}",
+                            theme::warn(&format!("control: handshake with {peer_addr} timed out"))
+                        );
                     }
                 }
             });
@@ -198,13 +293,25 @@ async fn run_control_accept_loop(ctx: Arc<Context>, listen_addr: String, mut ope
     });
 
     while let Some((noise_stream, peer_addr, peer_name)) = authenticated_rx.recv().await {
-        println!("ghostport: {}", theme::ok(&format!("control channel connected from {peer_addr} (peer \"{peer_name}\")")));
-        ctx.state.control.set_connected(peer_addr.to_string(), Some(peer_name));
+        println!(
+            "ghostport: {}",
+            theme::ok(&format!(
+                "control channel connected from {peer_addr} (peer \"{peer_name}\")"
+            ))
+        );
+        ctx.state
+            .control
+            .set_connected(peer_addr.to_string(), Some(peer_name));
 
         let (mut read_half, mut write_half) = tokio::io::split(noise_stream);
         run_control_session(&mut read_half, &mut write_half, &mut open_stream_rx).await;
         ctx.state.control.set_disconnected();
-        println!("ghostport: {}", theme::warn(&format!("control channel disconnected from {peer_addr}, awaiting reconnect")));
+        println!(
+            "ghostport: {}",
+            theme::warn(&format!(
+                "control channel disconnected from {peer_addr}, awaiting reconnect"
+            ))
+        );
     }
 }
 
@@ -235,27 +342,48 @@ async fn run_control_session(
     }
 }
 
-async fn run_data_accept_loop(ctx: Arc<Context>, listen_addr: String, pending: PendingStreams, limiter: Arc<HandshakeLimiter>) {
+async fn run_data_accept_loop(
+    ctx: Arc<Context>,
+    listen_addr: String,
+    pending: PendingStreams,
+    limiter: Arc<HandshakeLimiter>,
+) {
     let listener = match TcpListener::bind(&listen_addr).await {
         Ok(l) => l,
         Err(e) => {
-            eprintln!("ghostport: {}", theme::err(&format!("fatal: failed to bind data listener {listen_addr}: {e}")));
+            eprintln!(
+                "ghostport: {}",
+                theme::err(&format!(
+                    "fatal: failed to bind data listener {listen_addr}: {e}"
+                ))
+            );
             return;
         }
     };
-    println!("ghostport: {}", theme::ok(&format!("data channel listening on {listen_addr}")));
+    println!(
+        "ghostport: {}",
+        theme::ok(&format!("data channel listening on {listen_addr}"))
+    );
 
     loop {
         let (tcp, peer_addr) = match listener.accept().await {
             Ok(v) => v,
             Err(e) => {
-                eprintln!("ghostport: {}", theme::err(&format!("data accept failed: {e}")));
+                eprintln!(
+                    "ghostport: {}",
+                    theme::err(&format!("data accept failed: {e}"))
+                );
                 continue;
             }
         };
 
         let Some(permit) = limiter.try_acquire(peer_addr.ip()).await else {
-            eprintln!("ghostport: {}", theme::warn(&format!("data: rejected {peer_addr} (too many recent handshake attempts)")));
+            eprintln!(
+                "ghostport: {}",
+                theme::warn(&format!(
+                    "data: rejected {peer_addr} (too many recent handshake attempts)"
+                ))
+            );
             continue;
         };
 
@@ -263,52 +391,88 @@ async fn run_data_accept_loop(ctx: Arc<Context>, listen_addr: String, pending: P
         let pending = pending.clone();
         tokio::spawn(async move {
             if let Err(e) = handle_data_connection(ctx, tcp, pending, permit).await {
-                eprintln!("ghostport: {}", theme::err(&format!("data connection from {peer_addr}: {e}")));
+                eprintln!(
+                    "ghostport: {}",
+                    theme::err(&format!("data connection from {peer_addr}: {e}"))
+                );
             }
         });
     }
 }
 
-async fn handle_data_connection(ctx: Arc<Context>, mut tcp: TcpStream, pending: PendingStreams, permit: OwnedSemaphorePermit) -> std::io::Result<()> {
+async fn handle_data_connection(
+    ctx: Arc<Context>,
+    mut tcp: TcpStream,
+    pending: PendingStreams,
+    permit: OwnedSemaphorePermit,
+) -> std::io::Result<()> {
     let (peer_index, mut tunnel) = match tokio::time::timeout(HANDSHAKE_TIMEOUT, async {
-        let (peer_index, state) = peermatch::match_peer(&mut tcp, &ctx.private_key, &ctx.peers).await.map_err(|e| e.to_string())?;
-        let stream = NoiseStream::handshake(tcp, state).await.map_err(|e| e.to_string())?;
+        let (peer_index, state) = peermatch::match_peer(&mut tcp, &ctx.private_key, &ctx.peers)
+            .await
+            .map_err(|e| e.to_string())?;
+        let stream = NoiseStream::handshake(tcp, state)
+            .await
+            .map_err(|e| e.to_string())?;
         Ok::<_, String>((peer_index, stream))
     })
     .await
     {
         Ok(Ok(v)) => v,
         Ok(Err(e)) => return Err(std::io::Error::other(e)),
-        Err(_) => return Err(std::io::Error::new(std::io::ErrorKind::TimedOut, "handshake timed out")),
+        Err(_) => {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::TimedOut,
+                "handshake timed out",
+            ))
+        }
     };
     drop(permit);
     let matched_peer = &ctx.peers[peer_index];
     let hello: StreamHello = framing::recv_json(&mut tunnel).await?;
 
     if !matched_peer.links.contains(&hello.link_id) {
-        return Err(std::io::Error::other(format!("peer \"{}\" is not authorized for link \"{}\"", matched_peer.name, hello.link_id)));
+        return Err(std::io::Error::other(format!(
+            "peer \"{}\" is not authorized for link \"{}\"",
+            matched_peer.name, hello.link_id
+        )));
     }
 
     let Some(link) = ctx.config.links.iter().find(|l| l.id == hello.link_id) else {
-        return Err(std::io::Error::other(format!("unknown link id \"{}\"", hello.link_id)));
+        return Err(std::io::Error::other(format!(
+            "unknown link id \"{}\"",
+            hello.link_id
+        )));
     };
 
-    let stats = ctx.state.links.get(&link.id).expect("state's link map is built from this same config");
+    let stats = ctx
+        .state
+        .links
+        .get(&link.id)
+        .expect("state's link map is built from this same config");
 
     match (link.mode, hello.stream_id) {
         (LinkMode::Forward, None) => {
-            let target = link.target.clone().expect("validated: forward link on server has target");
+            let target = link
+                .target
+                .clone()
+                .expect("validated: forward link on server has target");
             let target_conn = TcpStream::connect(&target).await?;
             relay::relay(&link.id, stats, tunnel, target_conn).await;
             Ok(())
         }
         (LinkMode::Reverse, Some(stream_id)) => {
             let Some(external_conn) = pending.lock().await.remove(&stream_id) else {
-                return Err(std::io::Error::other(format!("stream {stream_id} for link \"{}\" is unknown or already timed out", link.id)));
+                return Err(std::io::Error::other(format!(
+                    "stream {stream_id} for link \"{}\" is unknown or already timed out",
+                    link.id
+                )));
             };
             relay::relay(&link.id, stats, tunnel, external_conn).await;
             Ok(())
         }
-        _ => Err(std::io::Error::other(format!("link \"{}\" mode/stream_id mismatch (protocol error)", link.id))),
+        _ => Err(std::io::Error::other(format!(
+            "link \"{}\" mode/stream_id mismatch (protocol error)",
+            link.id
+        ))),
     }
 }

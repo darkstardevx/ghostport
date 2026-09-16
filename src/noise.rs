@@ -9,17 +9,31 @@
 pub const PATTERN: &str = "Noise_KK_25519_ChaChaPoly_BLAKE2s";
 
 fn builder<'a>(local_private: &'a [u8], remote_public: &'a [u8]) -> snow::Builder<'a> {
-    snow::Builder::new(PATTERN.parse().expect("PATTERN is a valid Noise pattern string"))
-        .local_private_key(local_private)
-        .remote_public_key(remote_public)
+    snow::Builder::new(
+        PATTERN
+            .parse()
+            .expect("PATTERN is a valid Noise pattern string"),
+    )
+    .local_private_key(local_private)
+    .remote_public_key(remote_public)
 }
 
-pub fn initiator(local_private: &[u8], remote_public: &[u8]) -> Result<snow::HandshakeState, String> {
-    builder(local_private, remote_public).build_initiator().map_err(|e| format!("failed to build Noise initiator: {e}"))
+pub fn initiator(
+    local_private: &[u8],
+    remote_public: &[u8],
+) -> Result<snow::HandshakeState, String> {
+    builder(local_private, remote_public)
+        .build_initiator()
+        .map_err(|e| format!("failed to build Noise initiator: {e}"))
 }
 
-pub fn responder(local_private: &[u8], remote_public: &[u8]) -> Result<snow::HandshakeState, String> {
-    builder(local_private, remote_public).build_responder().map_err(|e| format!("failed to build Noise responder: {e}"))
+pub fn responder(
+    local_private: &[u8],
+    remote_public: &[u8],
+) -> Result<snow::HandshakeState, String> {
+    builder(local_private, remote_public)
+        .build_responder()
+        .map_err(|e| format!("failed to build Noise responder: {e}"))
 }
 
 #[cfg(test)]

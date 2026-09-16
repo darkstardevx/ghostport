@@ -5,21 +5,42 @@
 //! `cybercore` palette.
 
 pub fn ok(s: &str) -> String {
-    format!("{}{s}{}", cybercore::palette::acid_green(), cybercore::palette::RESET)
+    format!(
+        "{}{s}{}",
+        cybercore::palette::acid_green(),
+        cybercore::palette::RESET
+    )
 }
 
 pub fn warn(s: &str) -> String {
-    format!("{}{s}{}", cybercore::palette::orange(), cybercore::palette::RESET)
+    format!(
+        "{}{s}{}",
+        cybercore::palette::orange(),
+        cybercore::palette::RESET
+    )
 }
 
 pub fn err(s: &str) -> String {
-    format!("{}{s}{}", cybercore::palette::red(), cybercore::palette::RESET)
+    format!(
+        "{}{s}{}",
+        cybercore::palette::red(),
+        cybercore::palette::RESET
+    )
 }
 
 pub fn accent(s: &str) -> String {
-    format!("{}{s}{}", cybercore::palette::cyan(), cybercore::palette::RESET)
+    format!(
+        "{}{s}{}",
+        cybercore::palette::cyan(),
+        cybercore::palette::RESET
+    )
 }
 
 pub fn emphasis(s: &str) -> String {
-    format!("{}{}{s}{}", cybercore::palette::BOLD, cybercore::palette::acid_green(), cybercore::palette::RESET)
+    format!(
+        "{}{}{s}{}",
+        cybercore::palette::BOLD,
+        cybercore::palette::acid_green(),
+        cybercore::palette::RESET
+    )
 }

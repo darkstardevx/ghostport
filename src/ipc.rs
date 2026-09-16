@@ -40,12 +40,18 @@ pub async fn run_ipc_server(state: Arc<SharedState>, config: Arc<Config>, socket
     let listener = match UnixListener::bind(&socket_path) {
         Ok(l) => l,
         Err(e) => {
-            eprintln!("ghostport: ipc: failed to bind {}: {e}", socket_path.display());
+            eprintln!(
+                "ghostport: ipc: failed to bind {}: {e}",
+                socket_path.display()
+            );
             return;
         }
     };
     if let Err(e) = std::fs::set_permissions(&socket_path, std::fs::Permissions::from_mode(0o600)) {
-        eprintln!("ghostport: ipc: failed to set permissions on {}: {e}", socket_path.display());
+        eprintln!(
+            "ghostport: ipc: failed to set permissions on {}: {e}",
+            socket_path.display()
+        );
     }
 
     loop {
@@ -72,11 +78,16 @@ async fn respond(conn: &mut UnixStream, snapshot: &StatusSnapshot) -> std::io::R
 /// Client side: connect, read until EOF, parse. Used by `status` and the
 /// TUI's periodic refresh.
 pub async fn query_status(socket_path: &Path) -> Result<StatusSnapshot, String> {
-    let mut conn = UnixStream::connect(socket_path)
-        .await
-        .map_err(|e| format!("couldn't connect to {} ({e}) — is the daemon running?", socket_path.display()))?;
+    let mut conn = UnixStream::connect(socket_path).await.map_err(|e| {
+        format!(
+            "couldn't connect to {} ({e}) — is the daemon running?",
+            socket_path.display()
+        )
+    })?;
     let mut buf = Vec::new();
-    conn.read_to_end(&mut buf).await.map_err(|e| format!("failed to read status: {e}"))?;
+    conn.read_to_end(&mut buf)
+        .await
+        .map_err(|e| format!("failed to read status: {e}"))?;
     serde_json::from_slice(&buf).map_err(|e| format!("daemon sent an unparseable status: {e}"))
 }
 
@@ -86,7 +97,10 @@ mod tests {
     use crate::config::Role;
 
     fn scratch_socket_path(name: &str) -> PathBuf {
-        std::env::temp_dir().join(format!("ghostport-ipc-test-{name}-{}.sock", std::process::id()))
+        std::env::temp_dir().join(format!(
+            "ghostport-ipc-test-{name}-{}.sock",
+            std::process::id()
+        ))
     }
 
     fn sample_config() -> Config {
@@ -115,7 +129,9 @@ mod tests {
         let path = scratch_socket_path("roundtrip");
         let config = sample_config();
         let state = Arc::new(SharedState::new(&config));
-        state.control.set_connected("9.9.9.9:1".to_string(), Some("alice".to_string()));
+        state
+            .control
+            .set_connected("9.9.9.9:1".to_string(), Some("alice".to_string()));
 
         let config = Arc::new(config);
         tokio::spawn(run_ipc_server(state, config, path.clone()));

@@ -36,12 +36,23 @@ pub struct Context {
 pub async fn run(ctx: Context) -> std::io::Result<()> {
     let ctx = Arc::new(ctx);
 
-    tokio::spawn(ipc::run_ipc_server(ctx.state.clone(), ctx.config.clone(), ctx.socket_path.clone()));
+    tokio::spawn(ipc::run_ipc_server(
+        ctx.state.clone(),
+        ctx.config.clone(),
+        ctx.socket_path.clone(),
+    ));
 
     for link in &ctx.config.links {
         if link.mode == LinkMode::Forward {
-            let listen_addr = link.listen.clone().expect("validated: forward link on client requires listen");
-            tokio::spawn(run_forward_listener(ctx.clone(), link.id.clone(), listen_addr));
+            let listen_addr = link
+                .listen
+                .clone()
+                .expect("validated: forward link on client requires listen");
+            tokio::spawn(run_forward_listener(
+                ctx.clone(),
+                link.id.clone(),
+                listen_addr,
+            ));
         }
     }
 
@@ -53,17 +64,29 @@ async fn run_forward_listener(ctx: Arc<Context>, link_id: String, listen_addr: S
     let listener = match TcpListener::bind(&listen_addr).await {
         Ok(l) => l,
         Err(e) => {
-            eprintln!("ghostport: [{}] {}", theme::accent(&link_id), theme::err(&format!("failed to bind {listen_addr}: {e}")));
+            eprintln!(
+                "ghostport: [{}] {}",
+                theme::accent(&link_id),
+                theme::err(&format!("failed to bind {listen_addr}: {e}"))
+            );
             return;
         }
     };
-    println!("ghostport: [{}] {}", theme::accent(&link_id), theme::ok(&format!("listening on {listen_addr} (forward)")));
+    println!(
+        "ghostport: [{}] {}",
+        theme::accent(&link_id),
+        theme::ok(&format!("listening on {listen_addr} (forward)"))
+    );
 
     loop {
         let (local_conn, peer_addr) = match listener.accept().await {
             Ok(v) => v,
             Err(e) => {
-                eprintln!("ghostport: [{}] {}", theme::accent(&link_id), theme::err(&format!("accept failed: {e}")));
+                eprintln!(
+                    "ghostport: [{}] {}",
+                    theme::accent(&link_id),
+                    theme::err(&format!("accept failed: {e}"))
+                );
                 continue;
             }
         };
@@ -71,7 +94,11 @@ async fn run_forward_listener(ctx: Arc<Context>, link_id: String, listen_addr: S
         let link_id = link_id.clone();
         tokio::spawn(async move {
             if let Err(e) = dial_data_tunnel_and_relay(&ctx, &link_id, None, local_conn).await {
-                eprintln!("ghostport: [{}] {}", theme::accent(&link_id), theme::err(&format!("{peer_addr}: {e}")));
+                eprintln!(
+                    "ghostport: [{}] {}",
+                    theme::accent(&link_id),
+                    theme::err(&format!("{peer_addr}: {e}"))
+                );
             }
         });
     }
@@ -82,16 +109,44 @@ async fn run_forward_listener(ctx: Arc<Context>, link_id: String, listen_addr: S
 /// used both for forward-mode (`stream_id: None`, triggered by a local
 /// accept) and reverse-mode (`stream_id: Some(_)`, triggered by an
 /// `OpenStream` signal).
-async fn dial_data_tunnel_and_relay(ctx: &Context, link_id: &str, stream_id: Option<u64>, local_conn: TcpStream) -> std::io::Result<()> {
-    let server_data_addr = ctx.config.server_data_addr.clone().expect("validated: client role requires server_data_addr");
+async fn dial_data_tunnel_and_relay(
+    ctx: &Context,
+    link_id: &str,
+    stream_id: Option<u64>,
+    local_conn: TcpStream,
+) -> std::io::Result<()> {
+    let server_data_addr = ctx
+        .config
+        .server_data_addr
+        .clone()
+        .expect("validated: client role requires server_data_addr");
     let tcp = TcpStream::connect(&server_data_addr).await?;
-    let handshake = noise::initiator(&ctx.private_key, &ctx.peer_public_key).map_err(std::io::Error::other)?;
-    let mut tunnel = match tokio::time::timeout(HANDSHAKE_TIMEOUT, NoiseStream::handshake(tcp, handshake)).await {
-        Ok(result) => result.map_err(std::io::Error::other)?,
-        Err(_) => return Err(std::io::Error::new(std::io::ErrorKind::TimedOut, "handshake timed out")),
-    };
-    framing::send_json(&mut tunnel, &StreamHello { link_id: link_id.to_string(), stream_id }).await?;
-    let stats = ctx.state.links.get(link_id).expect("state's link map is built from this same config");
+    let handshake =
+        noise::initiator(&ctx.private_key, &ctx.peer_public_key).map_err(std::io::Error::other)?;
+    let mut tunnel =
+        match tokio::time::timeout(HANDSHAKE_TIMEOUT, NoiseStream::handshake(tcp, handshake)).await
+        {
+            Ok(result) => result.map_err(std::io::Error::other)?,
+            Err(_) => {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::TimedOut,
+                    "handshake timed out",
+                ))
+            }
+        };
+    framing::send_json(
+        &mut tunnel,
+        &StreamHello {
+            link_id: link_id.to_string(),
+            stream_id,
+        },
+    )
+    .await?;
+    let stats = ctx
+        .state
+        .links
+        .get(link_id)
+        .expect("state's link map is built from this same config");
     relay::relay(link_id, stats, tunnel, local_conn).await;
     Ok(())
 }
@@ -106,22 +161,41 @@ async fn dial_data_tunnel_and_relay(ctx: &Context, link_id: &str, stream_id: Opt
 /// that's silently half-dead (open but unresponsive) without ever
 /// erroring is a known gap, not worth the added complexity for v1.
 async fn run_control_loop(ctx: Arc<Context>) {
-    let server_control_addr = ctx.config.server_control_addr.clone().expect("validated: client role requires server_control_addr");
+    let server_control_addr = ctx
+        .config
+        .server_control_addr
+        .clone()
+        .expect("validated: client role requires server_control_addr");
     let mut backoff = Duration::from_secs(1);
     const MAX_BACKOFF: Duration = Duration::from_secs(30);
 
     loop {
         match connect_control(&ctx, &server_control_addr).await {
             Ok(mut noise_stream) => {
-                println!("ghostport: {}", theme::ok(&format!("control channel connected to {server_control_addr}")));
-                ctx.state.control.set_connected(server_control_addr.clone(), None);
+                println!(
+                    "ghostport: {}",
+                    theme::ok(&format!(
+                        "control channel connected to {server_control_addr}"
+                    ))
+                );
+                ctx.state
+                    .control
+                    .set_connected(server_control_addr.clone(), None);
                 backoff = Duration::from_secs(1);
                 run_control_session(&ctx, &mut noise_stream).await;
                 ctx.state.control.set_disconnected();
-                println!("ghostport: {}", theme::warn("control channel disconnected, reconnecting..."));
+                println!(
+                    "ghostport: {}",
+                    theme::warn("control channel disconnected, reconnecting...")
+                );
             }
             Err(e) => {
-                eprintln!("ghostport: {}", theme::err(&format!("control channel connect to {server_control_addr} failed: {e}")));
+                eprintln!(
+                    "ghostport: {}",
+                    theme::err(&format!(
+                        "control channel connect to {server_control_addr} failed: {e}"
+                    ))
+                );
             }
         }
         tokio::time::sleep(backoff).await;
@@ -131,10 +205,14 @@ async fn run_control_loop(ctx: Arc<Context>) {
 
 async fn connect_control(ctx: &Context, addr: &str) -> std::io::Result<NoiseStream<TcpStream>> {
     let tcp = TcpStream::connect(addr).await?;
-    let handshake = noise::initiator(&ctx.private_key, &ctx.peer_public_key).map_err(std::io::Error::other)?;
+    let handshake =
+        noise::initiator(&ctx.private_key, &ctx.peer_public_key).map_err(std::io::Error::other)?;
     match tokio::time::timeout(HANDSHAKE_TIMEOUT, NoiseStream::handshake(tcp, handshake)).await {
         Ok(result) => result.map_err(std::io::Error::other),
-        Err(_) => Err(std::io::Error::new(std::io::ErrorKind::TimedOut, "handshake timed out")),
+        Err(_) => Err(std::io::Error::new(
+            std::io::ErrorKind::TimedOut,
+            "handshake timed out",
+        )),
     }
 }
 
@@ -173,23 +251,42 @@ async fn run_control_session(ctx: &Arc<Context>, noise_stream: &mut NoiseStream<
 }
 
 fn link_expects_reverse(config: &Config, link_id: &str) -> bool {
-    config.links.iter().any(|l| l.id == link_id && l.mode == LinkMode::Reverse)
+    config
+        .links
+        .iter()
+        .any(|l| l.id == link_id && l.mode == LinkMode::Reverse)
 }
 
 async fn handle_open_stream(ctx: Arc<Context>, link_id: String, stream_id: u64) {
-    let Some(link) = ctx.config.links.iter().find(|l| l.id == link_id) else { return };
+    let Some(link) = ctx.config.links.iter().find(|l| l.id == link_id) else {
+        return;
+    };
     let Some(target) = link.target.clone() else {
-        eprintln!("ghostport: [{}] {}", theme::accent(&link_id), theme::err(&format!("reverse link has no target configured, can't fulfill stream {stream_id}")));
+        eprintln!(
+            "ghostport: [{}] {}",
+            theme::accent(&link_id),
+            theme::err(&format!(
+                "reverse link has no target configured, can't fulfill stream {stream_id}"
+            ))
+        );
         return;
     };
     let local_conn = match TcpStream::connect(&target).await {
         Ok(c) => c,
         Err(e) => {
-            eprintln!("ghostport: [{}] {}", theme::accent(&link_id), theme::err(&format!("failed to connect to target {target}: {e}")));
+            eprintln!(
+                "ghostport: [{}] {}",
+                theme::accent(&link_id),
+                theme::err(&format!("failed to connect to target {target}: {e}"))
+            );
             return;
         }
     };
     if let Err(e) = dial_data_tunnel_and_relay(&ctx, &link_id, Some(stream_id), local_conn).await {
-        eprintln!("ghostport: [{}] {}", theme::accent(&link_id), theme::err(&format!("stream {stream_id}: {e}")));
+        eprintln!(
+            "ghostport: [{}] {}",
+            theme::accent(&link_id),
+            theme::err(&format!("stream {stream_id}: {e}"))
+        );
     }
 }

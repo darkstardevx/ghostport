@@ -91,7 +91,8 @@ pub struct Config {
 
 impl Config {
     pub fn load(path: &std::path::Path) -> Result<Config, String> {
-        let text = std::fs::read_to_string(path).map_err(|e| format!("failed to read {}: {e}", path.display()))?;
+        let text = std::fs::read_to_string(path)
+            .map_err(|e| format!("failed to read {}: {e}", path.display()))?;
         toml::from_str(&text).map_err(|e| format!("failed to parse {}: {e}", path.display()))
     }
 
@@ -106,7 +107,8 @@ impl Config {
             return Err(errors);
         }
         let text = toml::to_string_pretty(self).map_err(|e| vec![e.to_string()])?;
-        std::fs::write(path, text).map_err(|e| vec![format!("failed to write {}: {e}", path.display())])
+        std::fs::write(path, text)
+            .map_err(|e| vec![format!("failed to write {}: {e}", path.display())])
     }
 
     /// Whether a link of `mode` needs `listen` (vs `target`) on *this*
@@ -114,7 +116,10 @@ impl Config {
     /// exposed for the TUI's link editor to know which field to prompt
     /// for and how to label it.
     pub fn link_needs_listen(&self, mode: LinkMode) -> bool {
-        matches!((self.role, mode), (Role::Client, LinkMode::Forward) | (Role::Server, LinkMode::Reverse))
+        matches!(
+            (self.role, mode),
+            (Role::Client, LinkMode::Forward) | (Role::Server, LinkMode::Reverse)
+        )
     }
 
     /// All problems found, not just the first — a config editor (or a
@@ -125,28 +130,74 @@ impl Config {
 
         match self.role {
             Role::Server => {
-                require_present(&mut errors, "listen_control", &self.listen_control, "role = \"server\"");
-                require_present(&mut errors, "listen_data", &self.listen_data, "role = \"server\"");
-                require_absent(&mut errors, "server_control_addr", &self.server_control_addr, "role = \"server\"");
-                require_absent(&mut errors, "server_data_addr", &self.server_data_addr, "role = \"server\"");
+                require_present(
+                    &mut errors,
+                    "listen_control",
+                    &self.listen_control,
+                    "role = \"server\"",
+                );
+                require_present(
+                    &mut errors,
+                    "listen_data",
+                    &self.listen_data,
+                    "role = \"server\"",
+                );
+                require_absent(
+                    &mut errors,
+                    "server_control_addr",
+                    &self.server_control_addr,
+                    "role = \"server\"",
+                );
+                require_absent(
+                    &mut errors,
+                    "server_data_addr",
+                    &self.server_data_addr,
+                    "role = \"server\"",
+                );
                 if self.peer_public_key.is_some() {
                     errors.push("`peer_public_key` must not be set when role = \"server\" (use `peers` instead)".to_string());
                 }
                 if self.peers.is_empty() {
-                    errors.push("`peers` must have at least one entry when role = \"server\"".to_string());
+                    errors.push(
+                        "`peers` must have at least one entry when role = \"server\"".to_string(),
+                    );
                 }
                 self.validate_peers(&mut errors);
             }
             Role::Client => {
-                require_present(&mut errors, "server_control_addr", &self.server_control_addr, "role = \"client\"");
-                require_present(&mut errors, "server_data_addr", &self.server_data_addr, "role = \"client\"");
-                require_absent(&mut errors, "listen_control", &self.listen_control, "role = \"client\"");
-                require_absent(&mut errors, "listen_data", &self.listen_data, "role = \"client\"");
+                require_present(
+                    &mut errors,
+                    "server_control_addr",
+                    &self.server_control_addr,
+                    "role = \"client\"",
+                );
+                require_present(
+                    &mut errors,
+                    "server_data_addr",
+                    &self.server_data_addr,
+                    "role = \"client\"",
+                );
+                require_absent(
+                    &mut errors,
+                    "listen_control",
+                    &self.listen_control,
+                    "role = \"client\"",
+                );
+                require_absent(
+                    &mut errors,
+                    "listen_data",
+                    &self.listen_data,
+                    "role = \"client\"",
+                );
                 match &self.peer_public_key {
-                    None => errors.push("`peer_public_key` is required when role = \"client\"".to_string()),
+                    None => errors
+                        .push("`peer_public_key` is required when role = \"client\"".to_string()),
                     Some(key) => {
                         if keys_module_decode(key).is_err() {
-                            errors.push("peer_public_key is not a valid base64-encoded 32-byte key".to_string());
+                            errors.push(
+                                "peer_public_key is not a valid base64-encoded 32-byte key"
+                                    .to_string(),
+                            );
                         }
                     }
                 }
@@ -172,7 +223,8 @@ impl Config {
     fn validate_peers(&self, errors: &mut Vec<String>) {
         let mut seen_names = std::collections::HashSet::new();
         let mut seen_keys = std::collections::HashSet::new();
-        let link_ids: std::collections::HashSet<&str> = self.links.iter().map(|l| l.id.as_str()).collect();
+        let link_ids: std::collections::HashSet<&str> =
+            self.links.iter().map(|l| l.id.as_str()).collect();
 
         for peer in &self.peers {
             if !seen_names.insert(peer.name.clone()) {
@@ -181,10 +233,16 @@ impl Config {
             match keys_module_decode(&peer.public_key) {
                 Ok(key) => {
                     if !seen_keys.insert(key) {
-                        errors.push(format!("peer \"{}\": public_key is already used by another peer", peer.name));
+                        errors.push(format!(
+                            "peer \"{}\": public_key is already used by another peer",
+                            peer.name
+                        ));
                     }
                 }
-                Err(_) => errors.push(format!("peer \"{}\": public_key is not a valid base64-encoded 32-byte key", peer.name)),
+                Err(_) => errors.push(format!(
+                    "peer \"{}\": public_key is not a valid base64-encoded 32-byte key",
+                    peer.name
+                )),
             }
             for link_id in &peer.links {
                 if !link_ids.contains(link_id.as_str()) {
@@ -200,18 +258,27 @@ impl Config {
     /// matrix; this mirrors it directly.
     fn validate_link(&self, link: &LinkConfig, errors: &mut Vec<String>) {
         let needs_listen = self.link_needs_listen(link.mode);
-        let (required_field, forbidden_field, required_value, forbidden_value) =
-            if needs_listen { ("listen", "target", &link.listen, &link.target) } else { ("target", "listen", &link.target, &link.listen) };
+        let (required_field, forbidden_field, required_value, forbidden_value) = if needs_listen {
+            ("listen", "target", &link.listen, &link.target)
+        } else {
+            ("target", "listen", &link.target, &link.listen)
+        };
 
         if required_value.is_none() {
-            errors.push(format!("link \"{}\": {:?} on this side ({:?}) requires `{required_field}`", link.id, link.mode, self.role));
+            errors.push(format!(
+                "link \"{}\": {:?} on this side ({:?}) requires `{required_field}`",
+                link.id, link.mode, self.role
+            ));
         }
         if forbidden_value.is_some() {
             errors.push(format!("link \"{}\": {:?} on this side ({:?}) must not set `{forbidden_field}` (that belongs on the peer's config)", link.id, link.mode, self.role));
         }
         if let Some(addr) = required_value.as_deref() {
             if addr.parse::<std::net::SocketAddr>().is_err() {
-                errors.push(format!("link \"{}\": `{required_field}` = \"{addr}\" is not a valid host:port address", link.id));
+                errors.push(format!(
+                    "link \"{}\": `{required_field}` = \"{addr}\" is not a valid host:port address",
+                    link.id
+                ));
             }
         }
     }
@@ -244,7 +311,11 @@ mod tests {
             role: Role::Server,
             private_key_path: PathBuf::from("/tmp/server.key"),
             peer_public_key: None,
-            peers: vec![PeerConfig { name: "client".to_string(), public_key: crate::keys::encode_public_key(&crate::keys::generate().public), links: Vec::new() }],
+            peers: vec![PeerConfig {
+                name: "client".to_string(),
+                public_key: crate::keys::encode_public_key(&crate::keys::generate().public),
+                links: Vec::new(),
+            }],
             listen_control: Some("0.0.0.0:9000".to_string()),
             listen_data: Some("0.0.0.0:9001".to_string()),
             server_control_addr: None,
@@ -257,7 +328,9 @@ mod tests {
         Config {
             role: Role::Client,
             private_key_path: PathBuf::from("/tmp/client.key"),
-            peer_public_key: Some(crate::keys::encode_public_key(&crate::keys::generate().public)),
+            peer_public_key: Some(crate::keys::encode_public_key(
+                &crate::keys::generate().public,
+            )),
             peers: Vec::new(),
             listen_control: None,
             listen_data: None,
@@ -278,7 +351,10 @@ mod tests {
         let mut cfg = base_server();
         cfg.listen_data = None;
         let errors = cfg.validate();
-        assert!(errors.iter().any(|e| e.contains("listen_data")), "{errors:?}");
+        assert!(
+            errors.iter().any(|e| e.contains("listen_data")),
+            "{errors:?}"
+        );
     }
 
     #[test]
@@ -286,7 +362,10 @@ mod tests {
         let mut cfg = base_client();
         cfg.listen_control = Some("0.0.0.0:9000".to_string());
         let errors = cfg.validate();
-        assert!(errors.iter().any(|e| e.contains("listen_control")), "{errors:?}");
+        assert!(
+            errors.iter().any(|e| e.contains("listen_control")),
+            "{errors:?}"
+        );
     }
 
     #[test]
@@ -294,7 +373,10 @@ mod tests {
         let mut cfg = base_client();
         cfg.peer_public_key = Some("not-base64!!".to_string());
         let errors = cfg.validate();
-        assert!(errors.iter().any(|e| e.contains("peer_public_key")), "{errors:?}");
+        assert!(
+            errors.iter().any(|e| e.contains("peer_public_key")),
+            "{errors:?}"
+        );
     }
 
     #[test]
@@ -302,23 +384,42 @@ mod tests {
         let mut cfg = base_client();
         cfg.peer_public_key = None;
         let errors = cfg.validate();
-        assert!(errors.iter().any(|e| e.contains("peer_public_key")), "{errors:?}");
+        assert!(
+            errors.iter().any(|e| e.contains("peer_public_key")),
+            "{errors:?}"
+        );
     }
 
     #[test]
     fn server_with_peer_public_key_set_is_rejected() {
         let mut cfg = base_server();
-        cfg.peer_public_key = Some(crate::keys::encode_public_key(&crate::keys::generate().public));
+        cfg.peer_public_key = Some(crate::keys::encode_public_key(
+            &crate::keys::generate().public,
+        ));
         let errors = cfg.validate();
-        assert!(errors.iter().any(|e| e.contains("peer_public_key") && e.contains("must not be set")), "{errors:?}");
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.contains("peer_public_key") && e.contains("must not be set")),
+            "{errors:?}"
+        );
     }
 
     #[test]
     fn client_with_peers_set_is_rejected() {
         let mut cfg = base_client();
-        cfg.peers = vec![PeerConfig { name: "x".to_string(), public_key: crate::keys::encode_public_key(&crate::keys::generate().public), links: Vec::new() }];
+        cfg.peers = vec![PeerConfig {
+            name: "x".to_string(),
+            public_key: crate::keys::encode_public_key(&crate::keys::generate().public),
+            links: Vec::new(),
+        }];
         let errors = cfg.validate();
-        assert!(errors.iter().any(|e| e.contains("`peers`") && e.contains("must not be set")), "{errors:?}");
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.contains("`peers`") && e.contains("must not be set")),
+            "{errors:?}"
+        );
     }
 
     #[test]
@@ -326,7 +427,12 @@ mod tests {
         let mut cfg = base_server();
         cfg.peers.clear();
         let errors = cfg.validate();
-        assert!(errors.iter().any(|e| e.contains("`peers`") && e.contains("at least one")), "{errors:?}");
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.contains("`peers`") && e.contains("at least one")),
+            "{errors:?}"
+        );
     }
 
     #[test]
@@ -334,7 +440,10 @@ mod tests {
         let mut cfg = base_server();
         cfg.peers[0].public_key = "not-base64!!".to_string();
         let errors = cfg.validate();
-        assert!(errors.iter().any(|e| e.contains("public_key")), "{errors:?}");
+        assert!(
+            errors.iter().any(|e| e.contains("public_key")),
+            "{errors:?}"
+        );
     }
 
     #[test]
@@ -342,13 +451,23 @@ mod tests {
         let mut cfg = base_server();
         cfg.peers[0].links.push("nonexistent".to_string());
         let errors = cfg.validate();
-        assert!(errors.iter().any(|e| e.contains("nonexistent") && e.contains("is not defined")), "{errors:?}");
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.contains("nonexistent") && e.contains("is not defined")),
+            "{errors:?}"
+        );
     }
 
     #[test]
     fn peer_link_id_that_exists_is_accepted() {
         let mut cfg = base_server();
-        cfg.links.push(LinkConfig { id: "db".to_string(), mode: LinkMode::Forward, listen: None, target: Some("127.0.0.1:5432".to_string()) });
+        cfg.links.push(LinkConfig {
+            id: "db".to_string(),
+            mode: LinkMode::Forward,
+            listen: None,
+            target: Some("127.0.0.1:5432".to_string()),
+        });
         cfg.peers[0].links.push("db".to_string());
         assert!(cfg.validate().is_empty(), "{:?}", cfg.validate());
     }
@@ -357,81 +476,165 @@ mod tests {
     fn duplicate_peer_public_keys_are_rejected() {
         let mut cfg = base_server();
         let shared_key = cfg.peers[0].public_key.clone();
-        cfg.peers.push(PeerConfig { name: "second".to_string(), public_key: shared_key, links: Vec::new() });
+        cfg.peers.push(PeerConfig {
+            name: "second".to_string(),
+            public_key: shared_key,
+            links: Vec::new(),
+        });
         let errors = cfg.validate();
-        assert!(errors.iter().any(|e| e.contains("already used by another peer")), "{errors:?}");
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.contains("already used by another peer")),
+            "{errors:?}"
+        );
     }
 
     #[test]
     fn duplicate_peer_names_are_rejected() {
         let mut cfg = base_server();
         let name = cfg.peers[0].name.clone();
-        cfg.peers.push(PeerConfig { name, public_key: crate::keys::encode_public_key(&crate::keys::generate().public), links: Vec::new() });
+        cfg.peers.push(PeerConfig {
+            name,
+            public_key: crate::keys::encode_public_key(&crate::keys::generate().public),
+            links: Vec::new(),
+        });
         let errors = cfg.validate();
-        assert!(errors.iter().any(|e| e.contains("duplicate name")), "{errors:?}");
+        assert!(
+            errors.iter().any(|e| e.contains("duplicate name")),
+            "{errors:?}"
+        );
     }
 
     #[test]
     fn forward_link_on_client_needs_listen_not_target() {
         let mut cfg = base_client();
-        cfg.links.push(LinkConfig { id: "db".to_string(), mode: LinkMode::Forward, listen: None, target: Some("127.0.0.1:5432".to_string()) });
+        cfg.links.push(LinkConfig {
+            id: "db".to_string(),
+            mode: LinkMode::Forward,
+            listen: None,
+            target: Some("127.0.0.1:5432".to_string()),
+        });
         let errors = cfg.validate();
-        assert!(errors.iter().any(|e| e.contains("requires `listen`")), "{errors:?}");
-        assert!(errors.iter().any(|e| e.contains("must not set `target`")), "{errors:?}");
+        assert!(
+            errors.iter().any(|e| e.contains("requires `listen`")),
+            "{errors:?}"
+        );
+        assert!(
+            errors.iter().any(|e| e.contains("must not set `target`")),
+            "{errors:?}"
+        );
     }
 
     #[test]
     fn forward_link_on_server_needs_target_not_listen() {
         let mut cfg = base_server();
-        cfg.links.push(LinkConfig { id: "db".to_string(), mode: LinkMode::Forward, listen: Some("0.0.0.0:5432".to_string()), target: None });
+        cfg.links.push(LinkConfig {
+            id: "db".to_string(),
+            mode: LinkMode::Forward,
+            listen: Some("0.0.0.0:5432".to_string()),
+            target: None,
+        });
         let errors = cfg.validate();
-        assert!(errors.iter().any(|e| e.contains("requires `target`")), "{errors:?}");
-        assert!(errors.iter().any(|e| e.contains("must not set `listen`")), "{errors:?}");
+        assert!(
+            errors.iter().any(|e| e.contains("requires `target`")),
+            "{errors:?}"
+        );
+        assert!(
+            errors.iter().any(|e| e.contains("must not set `listen`")),
+            "{errors:?}"
+        );
     }
 
     #[test]
     fn reverse_link_on_server_needs_listen_client_needs_target() {
         let mut server = base_server();
-        server.links.push(LinkConfig { id: "dev".to_string(), mode: LinkMode::Reverse, listen: Some("0.0.0.0:8080".to_string()), target: None });
+        server.links.push(LinkConfig {
+            id: "dev".to_string(),
+            mode: LinkMode::Reverse,
+            listen: Some("0.0.0.0:8080".to_string()),
+            target: None,
+        });
         assert!(server.validate().is_empty());
 
         let mut client = base_client();
-        client.links.push(LinkConfig { id: "dev".to_string(), mode: LinkMode::Reverse, listen: None, target: Some("127.0.0.1:3000".to_string()) });
+        client.links.push(LinkConfig {
+            id: "dev".to_string(),
+            mode: LinkMode::Reverse,
+            listen: None,
+            target: Some("127.0.0.1:3000".to_string()),
+        });
         assert!(client.validate().is_empty());
     }
 
     #[test]
     fn correctly_configured_forward_link_passes_on_both_sides() {
         let mut server = base_server();
-        server.links.push(LinkConfig { id: "db".to_string(), mode: LinkMode::Forward, listen: None, target: Some("127.0.0.1:5432".to_string()) });
+        server.links.push(LinkConfig {
+            id: "db".to_string(),
+            mode: LinkMode::Forward,
+            listen: None,
+            target: Some("127.0.0.1:5432".to_string()),
+        });
         assert!(server.validate().is_empty(), "{:?}", server.validate());
 
         let mut client = base_client();
-        client.links.push(LinkConfig { id: "db".to_string(), mode: LinkMode::Forward, listen: Some("127.0.0.1:5432".to_string()), target: None });
+        client.links.push(LinkConfig {
+            id: "db".to_string(),
+            mode: LinkMode::Forward,
+            listen: Some("127.0.0.1:5432".to_string()),
+            target: None,
+        });
         assert!(client.validate().is_empty(), "{:?}", client.validate());
     }
 
     #[test]
     fn duplicate_link_ids_are_rejected() {
         let mut cfg = base_server();
-        cfg.links.push(LinkConfig { id: "dup".to_string(), mode: LinkMode::Forward, listen: None, target: Some("127.0.0.1:1".to_string()) });
-        cfg.links.push(LinkConfig { id: "dup".to_string(), mode: LinkMode::Forward, listen: None, target: Some("127.0.0.1:2".to_string()) });
+        cfg.links.push(LinkConfig {
+            id: "dup".to_string(),
+            mode: LinkMode::Forward,
+            listen: None,
+            target: Some("127.0.0.1:1".to_string()),
+        });
+        cfg.links.push(LinkConfig {
+            id: "dup".to_string(),
+            mode: LinkMode::Forward,
+            listen: None,
+            target: Some("127.0.0.1:2".to_string()),
+        });
         let errors = cfg.validate();
-        assert!(errors.iter().any(|e| e.contains("duplicate id")), "{errors:?}");
+        assert!(
+            errors.iter().any(|e| e.contains("duplicate id")),
+            "{errors:?}"
+        );
     }
 
     #[test]
     fn non_socket_addr_target_is_rejected() {
         let mut cfg = base_server();
-        cfg.links.push(LinkConfig { id: "bad".to_string(), mode: LinkMode::Forward, listen: None, target: Some("not-an-address".to_string()) });
+        cfg.links.push(LinkConfig {
+            id: "bad".to_string(),
+            mode: LinkMode::Forward,
+            listen: None,
+            target: Some("not-an-address".to_string()),
+        });
         let errors = cfg.validate();
-        assert!(errors.iter().any(|e| e.contains("not a valid host:port")), "{errors:?}");
+        assert!(
+            errors.iter().any(|e| e.contains("not a valid host:port")),
+            "{errors:?}"
+        );
     }
 
     #[test]
     fn round_trips_through_toml() {
         let mut cfg = base_server();
-        cfg.links.push(LinkConfig { id: "db".to_string(), mode: LinkMode::Forward, listen: None, target: Some("127.0.0.1:5432".to_string()) });
+        cfg.links.push(LinkConfig {
+            id: "db".to_string(),
+            mode: LinkMode::Forward,
+            listen: None,
+            target: Some("127.0.0.1:5432".to_string()),
+        });
         let text = toml::to_string(&cfg).unwrap();
         let parsed: Config = toml::from_str(&text).unwrap();
         assert_eq!(parsed.links.len(), 1);
@@ -439,14 +642,22 @@ mod tests {
     }
 
     fn scratch_toml_path(name: &str) -> std::path::PathBuf {
-        std::env::temp_dir().join(format!("ghostport-config-test-{name}-{}.toml", std::process::id()))
+        std::env::temp_dir().join(format!(
+            "ghostport-config-test-{name}-{}.toml",
+            std::process::id()
+        ))
     }
 
     #[test]
     fn save_writes_a_valid_config_and_it_reloads_identically() {
         let path = scratch_toml_path("save-valid");
         let mut cfg = base_server();
-        cfg.links.push(LinkConfig { id: "db".to_string(), mode: LinkMode::Forward, listen: None, target: Some("127.0.0.1:5432".to_string()) });
+        cfg.links.push(LinkConfig {
+            id: "db".to_string(),
+            mode: LinkMode::Forward,
+            listen: None,
+            target: Some("127.0.0.1:5432".to_string()),
+        });
 
         cfg.save(&path).unwrap();
         let reloaded = Config::load(&path).unwrap();
@@ -463,7 +674,10 @@ mod tests {
 
         let result = cfg.save(&path);
         assert!(result.is_err());
-        assert!(!path.exists(), "an invalid config must never be written to disk");
+        assert!(
+            !path.exists(),
+            "an invalid config must never be written to disk"
+        );
     }
 
     #[test]

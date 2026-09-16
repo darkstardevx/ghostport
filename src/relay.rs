@@ -24,10 +24,17 @@ where
         Ok((a_to_b, b_to_a)) => {
             stats.bytes_forward.fetch_add(a_to_b, Relaxed);
             stats.bytes_back.fetch_add(b_to_a, Relaxed);
-            println!("ghostport: [{}] stream closed ({a_to_b} bytes forward, {b_to_a} bytes back)", theme::accent(link_id));
+            println!(
+                "ghostport: [{}] stream closed ({a_to_b} bytes forward, {b_to_a} bytes back)",
+                theme::accent(link_id)
+            );
         }
         Err(e) => {
-            eprintln!("ghostport: [{}] {}", theme::accent(link_id), theme::err(&format!("stream ended with an error: {e}")));
+            eprintln!(
+                "ghostport: [{}] {}",
+                theme::accent(link_id),
+                theme::err(&format!("stream ended with an error: {e}"))
+            );
         }
     }
 }

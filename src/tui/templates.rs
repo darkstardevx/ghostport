@@ -14,14 +14,54 @@ pub struct LinkTemplate {
 }
 
 pub const TEMPLATES: &[LinkTemplate] = &[
-    LinkTemplate { name: "SSH", mode: LinkMode::Forward, default_id: "ssh", default_port: 22 },
-    LinkTemplate { name: "HTTP", mode: LinkMode::Forward, default_id: "http", default_port: 80 },
-    LinkTemplate { name: "HTTPS", mode: LinkMode::Forward, default_id: "https", default_port: 443 },
-    LinkTemplate { name: "PostgreSQL", mode: LinkMode::Forward, default_id: "postgres", default_port: 5432 },
-    LinkTemplate { name: "MySQL / MariaDB", mode: LinkMode::Forward, default_id: "mysql", default_port: 3306 },
-    LinkTemplate { name: "Redis", mode: LinkMode::Forward, default_id: "redis", default_port: 6379 },
-    LinkTemplate { name: "Expose local dev server", mode: LinkMode::Reverse, default_id: "dev", default_port: 3000 },
-    LinkTemplate { name: "Expose local web server", mode: LinkMode::Reverse, default_id: "web", default_port: 8080 },
+    LinkTemplate {
+        name: "SSH",
+        mode: LinkMode::Forward,
+        default_id: "ssh",
+        default_port: 22,
+    },
+    LinkTemplate {
+        name: "HTTP",
+        mode: LinkMode::Forward,
+        default_id: "http",
+        default_port: 80,
+    },
+    LinkTemplate {
+        name: "HTTPS",
+        mode: LinkMode::Forward,
+        default_id: "https",
+        default_port: 443,
+    },
+    LinkTemplate {
+        name: "PostgreSQL",
+        mode: LinkMode::Forward,
+        default_id: "postgres",
+        default_port: 5432,
+    },
+    LinkTemplate {
+        name: "MySQL / MariaDB",
+        mode: LinkMode::Forward,
+        default_id: "mysql",
+        default_port: 3306,
+    },
+    LinkTemplate {
+        name: "Redis",
+        mode: LinkMode::Forward,
+        default_id: "redis",
+        default_port: 6379,
+    },
+    LinkTemplate {
+        name: "Expose local dev server",
+        mode: LinkMode::Reverse,
+        default_id: "dev",
+        default_port: 3000,
+    },
+    LinkTemplate {
+        name: "Expose local web server",
+        mode: LinkMode::Reverse,
+        default_id: "web",
+        default_port: 8080,
+    },
 ];
 
 /// One past the last real template — selecting this index means

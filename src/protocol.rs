@@ -17,7 +17,10 @@ pub enum ControlMessage {
     /// client can't be dialed directly (assumed to be behind NAT), so
     /// this asks it to dial a fresh data-tunnel connection itself and
     /// identify it with `stream_id`.
-    OpenStream { link_id: String, stream_id: u64 },
+    OpenStream {
+        link_id: String,
+        stream_id: u64,
+    },
 }
 
 /// The first message sent on every freshly-dialed data-tunnel connection
