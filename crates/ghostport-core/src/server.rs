@@ -30,6 +30,13 @@ use tokio::sync::{mpsc, Mutex, OwnedSemaphorePermit};
 /// hold the handshake — and its task — open indefinitely.
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
 
+/// How long a data connection is given to send its `StreamHello` after
+/// the Noise handshake completes, before it's abandoned. Without this,
+/// a peer that authenticates and then goes silent — deliberately or
+/// not — holds the connection (and its task) open forever, since
+/// nothing else ever times out this phase.
+const STREAM_HELLO_TIMEOUT: Duration = Duration::from_secs(10);
+
 /// Streams accepted on a `reverse`-mode link's listener, waiting to be
 /// claimed by a data-tunnel connection the client dials in response to
 /// the `OpenStream` signal. Removed either when claimed, or by the
@@ -444,7 +451,16 @@ async fn handle_data_connection(
     };
     drop(permit);
     let matched_peer = &ctx.peers[peer_index];
-    let hello: StreamHello = framing::recv_json(&mut tunnel).await?;
+    let hello: StreamHello =
+        match tokio::time::timeout(STREAM_HELLO_TIMEOUT, framing::recv_json(&mut tunnel)).await {
+            Ok(result) => result?,
+            Err(_) => {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::TimedOut,
+                    "peer completed the handshake but never sent a StreamHello",
+                ))
+            }
+        };
 
     if !matched_peer.links.contains(&hello.link_id) {
         return Err(std::io::Error::other(format!(

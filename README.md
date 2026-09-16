@@ -353,11 +353,17 @@ src/main.rs      CLI (keygen/check/run/status/tui) + integration tests
   editable from the TUI yet (edit the TOML directly for those).
 - No live config reload — editing links in the TUI always needs a
   restart (Service tab) to take effect.
+- The optional `ghostport-udp` plugin (`udp` Cargo feature, off by
+  default) is forward-mode only, has no NAT-rebind session migration
+  or rekeying, and no real replay-window enforcement yet (a bounded
+  cost after a recent hardening pass, not eliminated — see SECURITY.md).
+  No TUI support for `transport = "udp"` links yet either.
 
 See [SECURITY.md](SECURITY.md) for the full threat model — what's
 actually defended (MITM, eavesdropping, connection-flood DoS) versus
-what isn't (key compromise, multiple peers, the host itself) — and how
-to report a vulnerability.
+what isn't (key compromise, multiple peers, the host itself, and
+`ghostport-udp`'s own separate boundary) — and how to report a
+vulnerability.
 
 ## 📄 License
 

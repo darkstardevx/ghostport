@@ -32,6 +32,15 @@ const MAX_DATAGRAM: usize = 65535;
 /// game traffic) are bursty, not constant.
 const SESSION_IDLE_TIMEOUT: Duration = Duration::from_secs(60);
 
+/// How long a session is given to send its `StreamHello` after the
+/// Noise handshake finishes, before it's abandoned. Without this, a
+/// session that never gets a real follow-up — a replayed handshake
+/// message 1 from a spoofed source address can never produce one,
+/// since the replayer holds no key material — leaks its task and
+/// `sessions` map entry forever. Same value as
+/// `ghostport_core::server`'s `HANDSHAKE_TIMEOUT`/`STREAM_HELLO_TIMEOUT`.
+const STREAM_HELLO_TIMEOUT: Duration = Duration::from_secs(10);
+
 /// Everything one running UDP server instance needs.
 pub struct Context {
     /// The loaded, validated config — only its UDP-transport forward
@@ -69,7 +78,14 @@ pub async fn run(ctx: Context) -> std::io::Result<()> {
 
         let existing_tx = sessions.lock().await.get(&src).cloned();
         if let Some(tx) = existing_tx {
-            let _ = tx.send(buf[..n].to_vec()).await;
+            // try_send, not send().await: this loop is the *only* reader
+            // of the shared socket, so blocking here to wait for one
+            // backed-up session's channel to free up would stall every
+            // other session and every new handshake attempt too. A full
+            // channel means that session's consumer is behind; dropping
+            // its excess datagrams is correct, expected UDP behavior,
+            // not a bug.
+            let _ = tx.try_send(buf[..n].to_vec());
             continue;
         }
 
@@ -129,16 +145,24 @@ async fn run_session(
         }
     };
 
-    let hello: StreamHello = match noise_socket.recv().await {
-        Ok(bytes) => match serde_json::from_slice(bytes) {
+    let hello: StreamHello = match tokio::time::timeout(STREAM_HELLO_TIMEOUT, noise_socket.recv())
+        .await
+    {
+        Ok(Ok(bytes)) => match serde_json::from_slice(bytes) {
             Ok(h) => h,
             Err(e) => {
                 eprintln!("ghostport-udp: {peer_addr}: malformed StreamHello: {e}");
                 return;
             }
         },
-        Err(e) => {
+        Ok(Err(e)) => {
             eprintln!("ghostport-udp: {peer_addr}: didn't send a StreamHello: {e}");
+            return;
+        }
+        Err(_) => {
+            eprintln!(
+                    "ghostport-udp: {peer_addr}: timed out waiting for a StreamHello after the handshake"
+                );
             return;
         }
     };
@@ -208,4 +232,117 @@ async fn run_session(
         "ghostport-udp: [{}] session with {peer_addr} closed",
         link.id
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ghostport_core::config::{Config, Role};
+    use ghostport_core::{keys, noise};
+    use std::path::PathBuf;
+
+    /// A minimal, otherwise-unused Server-role config -- `run_session`
+    /// never reads it until after a real `StreamHello` resolves, which
+    /// this test's session never sends, so its actual field values
+    /// don't matter beyond being well-formed.
+    fn empty_server_config() -> Config {
+        Config {
+            role: Role::Server,
+            private_key_path: PathBuf::new(),
+            peer_public_key: None,
+            peers: vec![],
+            listen_control: None,
+            listen_data: None,
+            listen_udp: None,
+            server_control_addr: None,
+            server_data_addr: None,
+            server_udp_addr: None,
+            links: vec![],
+        }
+    }
+
+    /// A real, previously-unbounded gap: a session that completes the
+    /// Noise handshake (the responder side finishes in one reply, per
+    /// `Noise_KK` -- no further read needed) but whose peer never sends
+    /// a `StreamHello` afterward used to hang `run_session` forever,
+    /// leaking the task and its `sessions` map entry. Exactly what a
+    /// replayed handshake message 1 from a spoofed source address does,
+    /// since the replayer can never produce a valid encrypted follow-up.
+    ///
+    /// Drives a real message-1/message-2 exchange (not a hand-built
+    /// state) to get a genuinely advanced responder `HandshakeState`,
+    /// the same shape `peermatch::match_peer_bytes` hands `run_session`
+    /// in production, then calls it directly with an `inbound` channel
+    /// nothing ever sends on -- standing in for a peer that never
+    /// follows up.
+    #[tokio::test]
+    async fn session_with_no_stream_hello_is_abandoned_not_left_hanging() {
+        let responder_kp = keys::generate();
+        let initiator_kp = keys::generate();
+
+        let mut initiator_state =
+            noise::initiator(&initiator_kp.private, &responder_kp.public).unwrap();
+        let mut responder_state =
+            noise::responder(&responder_kp.private, &initiator_kp.public).unwrap();
+        let mut msg1 = vec![0u8; 256];
+        let len = initiator_state.write_message(&[], &mut msg1).unwrap();
+        let mut payload = vec![0u8; 256];
+        responder_state
+            .read_message(&msg1[..len], &mut payload)
+            .unwrap();
+        assert!(
+            responder_state.is_my_turn(),
+            "responder should be ready to write message 2 after processing message 1"
+        );
+
+        let socket = Arc::new(UdpSocket::bind("127.0.0.1:0").await.unwrap());
+        let peer_addr: SocketAddr = "127.0.0.1:1".parse().unwrap();
+        let (_tx, rx) = mpsc::channel(16); // dropped, never sent on -- the peer never follows up
+
+        let ctx = Context {
+            config: Arc::new(empty_server_config()),
+            private_key: Arc::new(responder_kp.private),
+            peers: Arc::new(vec![]),
+        };
+        let peer_links = HashSet::new();
+
+        let result = tokio::time::timeout(
+            Duration::from_secs(15),
+            run_session(
+                &ctx,
+                socket,
+                peer_addr,
+                "test-peer",
+                &peer_links,
+                responder_state,
+                rx,
+            ),
+        )
+        .await;
+        assert!(
+            result.is_ok(),
+            "run_session must return (abandon the session) rather than hang forever \
+             waiting for a StreamHello that never arrives"
+        );
+    }
+
+    /// Confirms the exact mechanism the demux loop's `try_send` call
+    /// relies on: a full channel fails immediately rather than
+    /// blocking. `tokio::sync::mpsc::Sender::try_send` guarantees this
+    /// itself -- this test exists so a future edit that accidentally
+    /// swaps it back to `send(...).await` (reintroducing the
+    /// head-of-line-blocking bug this module's `run` fixed) has a
+    /// concrete regression test to break, not just a code-review nit.
+    #[test]
+    fn try_send_on_a_full_channel_fails_immediately_instead_of_blocking() {
+        let (tx, mut rx) = mpsc::channel(1);
+        tx.try_send(vec![1]).expect("first send has room");
+        let result = tx.try_send(vec![2]);
+        assert!(
+            result.is_err(),
+            "a full channel must reject immediately, not block the caller"
+        );
+        // The first datagram is still there, untouched by the failed send.
+        assert_eq!(rx.try_recv().unwrap(), vec![1]);
+    }
 }

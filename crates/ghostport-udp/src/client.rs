@@ -92,7 +92,11 @@ async fn run_forward_listener(ctx: Arc<Context>, link_id: String, listen_addr: S
 
         let existing_tx = flows.lock().await.get(&src).cloned();
         if let Some(tx) = existing_tx {
-            let _ = tx.send(buf[..n].to_vec()).await;
+            // try_send, not send().await -- see the matching comment in
+            // server.rs's demux loop. This is the only reader of the
+            // shared local listen socket; blocking here for one flow's
+            // backed-up channel would stall every other local flow too.
+            let _ = tx.try_send(buf[..n].to_vec());
             continue;
         }
 

@@ -579,3 +579,69 @@ async fn peer_is_rejected_from_a_link_outside_its_own_allowlist() {
         "an unauthorized attempt must not count as a real stream"
     );
 }
+
+/// A real, previously-unbounded gap: a data connection that completes
+/// the Noise handshake but then never sends a `StreamHello` used to
+/// hang `handle_data_connection` forever, leaking the task and the
+/// open socket. Proves it's now bounded by `STREAM_HELLO_TIMEOUT`:
+/// completes a real handshake directly against the data listener, then
+/// deliberately sends nothing, and confirms the server closes the
+/// connection well inside a generous margin over that timeout rather
+/// than leaving it open indefinitely.
+#[tokio::test]
+async fn data_connection_that_never_sends_a_stream_hello_is_closed_not_left_hanging() {
+    let server_kp = keys::generate();
+    let client_kp = keys::generate();
+
+    let control_port = free_port();
+    let data_port = free_port();
+
+    let server_config = Config {
+        role: Role::Server,
+        private_key_path: PathBuf::new(),
+        peer_public_key: None,
+        peers: vec![PeerConfig {
+            name: "client".to_string(),
+            public_key: keys::encode_public_key(&client_kp.public),
+            links: vec![],
+        }],
+        listen_control: Some(format!("127.0.0.1:{control_port}")),
+        listen_data: Some(format!("127.0.0.1:{data_port}")),
+        listen_udp: None,
+        server_control_addr: None,
+        server_data_addr: None,
+        server_udp_addr: None,
+        links: vec![],
+    };
+    let state = Arc::new(stats::SharedState::new(&server_config));
+    tokio::spawn(server::run(server::Context {
+        config: Arc::new(server_config),
+        private_key: Arc::new(server_kp.private),
+        peers: Arc::new(vec![peermatch::ResolvedPeer {
+            name: "client".to_string(),
+            public_key: client_kp.public.clone(),
+            links: Default::default(),
+        }]),
+        state,
+        socket_path: scratch_socket_path("no-stream-hello"),
+    }));
+
+    let tcp = connect_with_retry(&format!("127.0.0.1:{data_port}"), Duration::from_secs(5)).await;
+    let handshake = noise::initiator(&client_kp.private, &server_kp.public).unwrap();
+    let mut tunnel = snowstorm::NoiseStream::handshake(tcp, handshake)
+        .await
+        .expect("a real allowed peer's handshake must still succeed");
+
+    // Deliberately send nothing after this. Before the fix, this read
+    // would never resolve -- the server had nothing timing out this
+    // phase at all. A generous margin (15s) over the real 10s
+    // STREAM_HELLO_TIMEOUT still fails the test fast if the bug
+    // regresses, rather than hanging the whole suite.
+    let mut buf = Vec::new();
+    let read_result =
+        tokio::time::timeout(Duration::from_secs(15), tunnel.read_to_end(&mut buf)).await;
+    assert!(
+        read_result.is_ok(),
+        "server must close a connection that never sends a StreamHello, not hold it open forever"
+    );
+}

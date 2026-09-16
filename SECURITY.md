@@ -8,12 +8,12 @@ What GhostPort's design actually defends against, and what it doesn't
 ### What's defended
 
 - **Man-in-the-middle.** `Noise_KK_25519_ChaChaPoly_BLAKE2s`
-  (`src/noise.rs`) — both peers already know each other's pinned static
+  (`crates/ghostport-core/src/noise.rs`) — both peers already know each other's pinned static
   public key ahead of time. An attacker without the matching private
   key cannot complete the handshake at all; there's no separate
   "verify identity after the fact" step for them to bypass. This is
   enforced by the cryptography itself, not a policy check. A server
-  with several pinned peers (`src/peermatch.rs`) tries each allowed
+  with several pinned peers (`crates/ghostport-core/src/peermatch.rs`) tries each allowed
   key against an incoming handshake in turn — an unrecognized key
   still can't complete the handshake against *any* of them, the same
   guarantee extended to a list instead of one fixed key.
@@ -26,7 +26,7 @@ What GhostPort's design actually defends against, and what it doesn't
 - **Unauthenticated connection-flood DoS.** Every handshake attempt
   costs real CPU (X25519 + ChaCha20-Poly1305 setup) before the pinned
   key can even be checked. Every handshake site has a 10s timeout, and
-  `src/ratelimit.rs` rejects an attempt before it ever starts a
+  `crates/ghostport-core/src/ratelimit.rs` rejects an attempt before it ever starts a
   handshake once a source IP or the global concurrency budget is
   exhausted.
 - **A stuck/malicious connection blocking the real peer.** The control
@@ -59,12 +59,46 @@ What GhostPort's design actually defends against, and what it doesn't
   server can pin several peers (`peers` in its config), each restricted
   to its own `links` — but removing a peer only takes effect on the
   next restart (no live revocation), and Phase 1's connection-flood
-  limiter (`src/ratelimit.rs`) is shared across all peers on that
-  server, not tracked separately per identity. Reverse-mode links are
-  additionally bound by the pre-existing one-active-control-session-
-  at-a-time design — only whichever peer currently holds the control
-  connection can be signaled to fulfill a reverse-mode request;
-  forward-mode links have no such constraint.
+  limiter (`crates/ghostport-core/src/ratelimit.rs`) is shared across
+  all peers on that server, not tracked separately per identity.
+  Reverse-mode links are additionally bound by the pre-existing
+  one-active-control-session-at-a-time design — only whichever peer
+  currently holds the control connection can be signaled to fulfill a
+  reverse-mode request; forward-mode links have no such constraint.
+
+### `ghostport-udp` (optional `udp` feature)
+
+A separate plugin crate (`crates/ghostport-udp`), off by default,
+forward-mode only. Reuses the same `Noise_KK` handshake and pinned-key
+guarantee above — it is not a separate protocol with its own,
+un-reviewed cryptography.
+
+**Defended**: the same MITM/eavesdropping/tampering guarantees as TCP
+(still `Noise_KK`, still ChaCha20-Poly1305 transport, via
+`snowstorm::NoiseSocket` instead of `NoiseStream`); the same connection-
+flood rate limiting (`ratelimit::HandshakeLimiter`, reused as-is,
+keyed by source IP); and — since a hardening pass on this same crate —
+a bounded wait (`STREAM_HELLO_TIMEOUT`, 10s) for a session to identify
+its link after the handshake, so a session that never follows up (a
+crashed peer, or a replayed handshake message from a spoofed source
+address) is abandoned instead of leaking a task and a slot in the
+session table forever.
+
+**NOT defended**:
+
+- **Real replay-window enforcement.** `snowstorm`'s `PacketVerifier`
+  hook exists for this and is wired in, but currently a no-op. A
+  replayed handshake message can still make the server spend a
+  `STREAM_HELLO_TIMEOUT` window of work on a session that will never
+  complete — bounded now (see above), not eliminated.
+- **NAT-rebind session migration.** A session is identified by source
+  address; if a client's address changes mid-session (e.g. a WiFi
+  roam), the old session simply times out (`SESSION_IDLE_TIMEOUT`,
+  60s) and a fresh handshake starts. No continuity across the change.
+- **Rekeying.** A session's transport key lives for the session's
+  whole lifetime; long-lived flows aren't rekeyed.
+- **Reverse-mode UDP.** Not implemented at all yet — rejected outright
+  by `Config::validate`, not silently unsupported.
 - **The host it runs on.** GhostPort assumes the machine it runs on
   isn't already compromised — it doesn't defend against a local
   attacker with access to the running process or its config/key files.
