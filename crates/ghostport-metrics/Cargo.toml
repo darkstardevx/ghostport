@@ -1,0 +1,18 @@
+[package]
+name = "ghostport-metrics"
+version = "0.1.0"
+edition = "2021"
+description = "GhostPort's second plugin -- a Prometheus metrics exporter. A separate sidecar process that polls a running daemon's existing status IPC socket; makes no changes to ghostport-core and is never linked into the ghostport binary itself."
+license = "MIT"
+
+[[bin]]
+name = "ghostport-metrics"
+path = "src/main.rs"
+
+[dependencies]
+# Only for ipc::query_status / stats::StatusSnapshot -- this crate is a
+# pure consumer of the existing status IPC protocol, not a new
+# integration point into the daemon itself.
+ghostport-core = { path = "../ghostport-core" }
+tokio = { version = "1.38", features = ["full"] }
+clap = { version = "4.5", features = ["derive"] }

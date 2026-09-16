@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/ghostport-core", "crates/ghostport-udp"]
+members = ["crates/ghostport-core", "crates/ghostport-udp", "crates/ghostport-metrics"]
 
 [package]
 name = "ghostport"

@@ -744,6 +744,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "ghostport-metrics"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "ghostport-core",
+ "tokio",
+]
+
+[[package]]
 name = "ghostport-udp"
 version = "0.1.0"
 dependencies = [
