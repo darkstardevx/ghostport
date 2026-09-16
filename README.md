@@ -1,5 +1,7 @@
 # 👻 GhostPort
 
+[![CI](https://github.com/darkstardevx/ghostport/actions/workflows/ci.yml/badge.svg)](https://github.com/darkstardevx/ghostport/actions/workflows/ci.yml)
+
 `Rust` · `Noise Protocol` · `tokio`
 
 **Encrypted, NAT-traversing port forwarder.** Like `ssh -L`/`ssh -R`, but
@@ -239,7 +241,18 @@ and the daemon's own connection logs (`server.rs`/`client.rs`/
 
 ## ✅ Verification
 
-59 tests. Per-module unit tests: config validation (every (role, mode)
+CI runs on every push (`.github/workflows/ci.yml`): format, clippy
+(default + all-features), the full test suite (including the real
+network-namespace tests, which need the same Ubuntu 24.04+ AppArmor
+`unshare` workaround gateflow's own CI required), and `cargo deny
+check`. Run the same gates locally before pushing:
+
+```bash
+./scripts/release-gates quick   # fmt/check/clippy only
+./scripts/release-gates full    # + tests + cargo-deny
+```
+
+72 tests. Per-module unit tests: config validation (every (role, mode)
 ⇄ required-field combination, duplicate ids, bad addresses, TOML
 round-trip, `save()` refusing an invalid config and never touching disk
 when it does), key generation/save/load/permissions, the JSON framing

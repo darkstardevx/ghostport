@@ -1,0 +1,127 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - "**"
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: "1"
+
+jobs:
+  quality:
+    name: Format and Clippy
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache Rust
+        uses: Swatinem/rust-cache@v2
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      - name: Check diff whitespace
+        run: git diff --check
+
+      - name: Clippy
+        run: >
+          cargo clippy
+          --all-targets
+          --
+          -D warnings
+
+      - name: Clippy all features
+        run: >
+          cargo clippy
+          --all-targets
+          --all-features
+          --
+          -D warnings
+
+  test:
+    name: Tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust
+        uses: Swatinem/rust-cache@v2
+
+      # ubuntu-latest is Ubuntu 24.04, which ships
+      # kernel.apparmor_restrict_unprivileged_userns=1 by default — this
+      # blocks CLONE_NEWUSER outright unless relaxed. tests_gateflow.rs
+      # (via gateflow's Sandbox::paired()) needs real unprivileged user +
+      # network namespaces. Same mitigation gateflow's own CI needed —
+      # confirmed for real there, not assumed here. Harmless no-op on
+      # runners/distros without this sysctl at all.
+      - name: Allow unprivileged user namespaces (Ubuntu 24.04+ AppArmor)
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
+
+      - name: Verify unprivileged user namespaces are available
+        run: |
+          unshare --user --net --map-root-user true || {
+            echo "::error::unprivileged user+net namespaces are not available on this runner";
+            exit 1;
+          }
+
+      - name: Check default features
+        run: >
+          cargo check
+          --all-targets
+
+      - name: Test default features
+        run: >
+          cargo test
+          --all-targets
+
+      - name: Check all features
+        run: >
+          cargo check
+          --all-targets
+          --all-features
+
+      - name: Test all features
+        run: >
+          cargo test
+          --all-targets
+          --all-features
+
+  supply-chain:
+    name: Supply-chain checks
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install cargo-deny
+        run: cargo install cargo-deny --locked
+
+      - name: cargo deny check
+        run: cargo deny check
