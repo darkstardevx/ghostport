@@ -1,0 +1,19 @@
+[package]
+name = "ghostport-udp"
+version = "0.1.0"
+edition = "2021"
+description = "GhostPort's first real plugin crate -- Noise-authenticated UDP forwarding, forward-mode only in v1. Depends on ghostport-core, the same way any future plugin crate would."
+license = "MIT"
+
+[dependencies]
+ghostport-core = { path = "../ghostport-core" }
+tokio = { version = "1.38", features = ["full"] }
+serde_json = "1.0"
+# Already a direct dependency of ghostport-core (for the TCP NoiseStream
+# path); this crate uses its sibling `socket` API instead --
+# `NoiseSocket`/`PacketPoller`/`PacketVerifier`, built for datagram
+# transports. Same default features (`stream` + `socket`, confirmed via
+# snowstorm's own Cargo.toml) already resolved transitively, so nothing
+# new actually enters the supply chain.
+snowstorm = "0.4"
+snow = "0.9"

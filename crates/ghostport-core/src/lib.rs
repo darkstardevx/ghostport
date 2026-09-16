@@ -1,18 +1,21 @@
 //! The forwarding engine behind `ghostport` — encrypted, NAT-traversing
 //! port forwarding over a real Noise handshake (`Noise_KK`), with no
 //! CLI or TUI dependencies. Extracted from the `ghostport` binary so a
-//! real second consumer (a future plugin crate, e.g.
-//! `ghostport-wireguard`, using this crate's peer-authenticated
-//! control channel to provision something else) has an actual library
-//! to depend on, not a private module inside someone else's binary.
+//! real second consumer has an actual library to depend on, not a
+//! private module inside someone else's binary.
 //!
 //! # Status
 //!
 //! This is the same engine `ghostport` itself uses — extracted, not
-//! rewritten. No plugin trait boundary exists yet (deliberately —
-//! designing one before a real second consumer exists to validate it
-//! against would mean guessing). This crate's job right now is just to
-//! have a real, documented, usable public API.
+//! rewritten. `ghostport-udp` (UDP forwarding, forward-mode only) is
+//! now a real second consumer — the first plugin crate, proving the
+//! extraction actually works rather than just being a guess at what
+//! one might need. It reuses this crate's [`noise`]/[`peermatch`]
+//! directly (still `Noise_KK`, same pinned-key guarantee) rather than
+//! inventing its own handshake. No plugin *trait* boundary exists yet
+//! — `ghostport-udp` calls this crate's concrete functions directly,
+//! which was enough; a trait is still deferred until a second plugin
+//! actually needs one, rather than guessed at now.
 //!
 //! # Layout
 //!

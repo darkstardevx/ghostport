@@ -719,6 +719,7 @@ dependencies = [
  "crossterm",
  "cybercore",
  "ghostport-core",
+ "ghostport-udp",
  "ratatui",
  "serde_json",
  "tokio",
@@ -740,6 +741,17 @@ dependencies = [
  "snowstorm",
  "tokio",
  "toml",
+]
+
+[[package]]
+name = "ghostport-udp"
+version = "0.1.0"
+dependencies = [
+ "ghostport-core",
+ "serde_json",
+ "snow",
+ "snowstorm",
+ "tokio",
 ]
 
 [[package]]

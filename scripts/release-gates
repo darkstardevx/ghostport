@@ -101,6 +101,14 @@ run_quick_gates() {
             -p ghostport-core \
             --no-deps \
             --all-features
+
+    run_gate \
+        "Strict rustdoc (ghostport-udp public API)" \
+        env RUSTDOCFLAGS="-D warnings" \
+        cargo doc \
+            -p ghostport-udp \
+            --no-deps \
+            --all-features
 }
 
 run_full_gates() {

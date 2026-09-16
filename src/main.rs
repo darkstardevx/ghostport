@@ -341,14 +341,34 @@ async fn run_daemon(config_path: &Path, socket_path: PathBuf) -> ExitCode {
                 });
             }
             let config = Arc::new(cfg);
-            server::run(server::Context {
-                config,
-                private_key,
-                peers: Arc::new(peers),
+            let peers = Arc::new(peers);
+            let core_fut = server::run(server::Context {
+                config: config.clone(),
+                private_key: private_key.clone(),
+                peers: peers.clone(),
                 state,
                 socket_path,
-            })
-            .await
+            });
+            #[cfg(feature = "udp")]
+            {
+                let udp_fut = ghostport_udp::server::run(ghostport_udp::server::Context {
+                    config,
+                    private_key,
+                    peers,
+                });
+                // Both loop forever under normal operation -- whichever
+                // returns first is the one that matters (almost always
+                // a fatal bind error), and the other is dropped/aborted
+                // rather than left running orphaned.
+                tokio::select! {
+                    r = core_fut => r,
+                    r = udp_fut => r,
+                }
+            }
+            #[cfg(not(feature = "udp"))]
+            {
+                core_fut.await
+            }
         }
         Role::Client => {
             let peer_public_key = match keys::decode_public_key(
@@ -363,14 +383,30 @@ async fn run_daemon(config_path: &Path, socket_path: PathBuf) -> ExitCode {
                 }
             };
             let config = Arc::new(cfg);
-            client::run(client::Context {
-                config,
-                private_key,
-                peer_public_key: Arc::new(peer_public_key),
+            let peer_public_key = Arc::new(peer_public_key);
+            let core_fut = client::run(client::Context {
+                config: config.clone(),
+                private_key: private_key.clone(),
+                peer_public_key: peer_public_key.clone(),
                 state,
                 socket_path,
-            })
-            .await
+            });
+            #[cfg(feature = "udp")]
+            {
+                let udp_fut = ghostport_udp::client::run(ghostport_udp::client::Context {
+                    config,
+                    private_key,
+                    peer_public_key,
+                });
+                tokio::select! {
+                    r = core_fut => r,
+                    r = udp_fut => r,
+                }
+            }
+            #[cfg(not(feature = "udp"))]
+            {
+                core_fut.await
+            }
         }
     };
 

@@ -1,0 +1,210 @@
+//! Client role: one local UDP listen socket per UDP forward link
+//! (`link.listen`), demuxed by *local* source address into independent
+//! outbound flows. Each flow dials its own dedicated ephemeral-port
+//! session to the server (`Config::server_udp_addr`), runs a real
+//! `Noise_KK` handshake as initiator, sends one [`StreamHello`], then
+//! relays real payload both ways — symmetric to how [`crate::server`]
+//! demuxes inbound sessions by *source* address on its side.
+
+use crate::poller::ConnectedPoller;
+use ghostport_core::config::{Config, LinkMode, Transport};
+use ghostport_core::noise;
+use ghostport_core::protocol::StreamHello;
+use snowstorm::NoiseSocket;
+use std::collections::HashMap;
+use std::net::SocketAddr;
+use std::sync::Arc;
+use std::time::Duration;
+use tokio::net::UdpSocket;
+use tokio::sync::{mpsc, Mutex};
+
+const MAX_DATAGRAM: usize = 65535;
+
+/// Mirrors `server::SESSION_IDLE_TIMEOUT` — same reasoning, same value.
+const FLOW_IDLE_TIMEOUT: Duration = Duration::from_secs(60);
+
+/// Mirrors `ghostport_core::client`/`server`'s own `HANDSHAKE_TIMEOUT`.
+/// Real network round trip this time (unlike the server's responder
+/// side, which never needs to wait on one) — a dropped handshake
+/// datagram would otherwise hang a flow forever, since
+/// `NoiseSocket::handshake_with_verifier` has no retry of its own.
+const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// Everything one running UDP client instance needs.
+pub struct Context {
+    /// The loaded, validated config — only its UDP-transport forward
+    /// links and `server_udp_addr` matter here.
+    pub config: Arc<Config>,
+    /// This instance's own static Noise private key.
+    pub private_key: Arc<Vec<u8>>,
+    /// The single pinned peer's static Noise public key.
+    pub peer_public_key: Arc<Vec<u8>>,
+}
+
+type FlowMap = Arc<Mutex<HashMap<SocketAddr, mpsc::Sender<Vec<u8>>>>>;
+
+/// Runs the UDP client role: starts one local listen socket per
+/// UDP-transport forward link and demuxes it into per-flow sessions.
+/// Runs until the process exits (or until every started listener task
+/// exits, which doesn't happen under normal operation).
+pub async fn run(ctx: Context) -> std::io::Result<()> {
+    let ctx = Arc::new(ctx);
+    let mut listeners = tokio::task::JoinSet::new();
+
+    for link in &ctx.config.links {
+        if link.transport == Transport::Udp && link.mode == LinkMode::Forward {
+            let listen_addr = link
+                .listen
+                .clone()
+                .expect("validated: udp forward link on client requires listen");
+            listeners.spawn(run_forward_listener(
+                ctx.clone(),
+                link.id.clone(),
+                listen_addr,
+            ));
+        }
+    }
+
+    while listeners.join_next().await.is_some() {}
+    Ok(())
+}
+
+async fn run_forward_listener(ctx: Arc<Context>, link_id: String, listen_addr: String) {
+    let socket = match UdpSocket::bind(&listen_addr).await {
+        Ok(s) => Arc::new(s),
+        Err(e) => {
+            eprintln!("ghostport-udp: [{link_id}] failed to bind {listen_addr}: {e}");
+            return;
+        }
+    };
+    println!("ghostport-udp: [{link_id}] listening on {listen_addr} (forward)");
+
+    let flows: FlowMap = Arc::new(Mutex::new(HashMap::new()));
+    let mut buf = vec![0u8; MAX_DATAGRAM];
+    loop {
+        let (n, src) = match socket.recv_from(&mut buf).await {
+            Ok(v) => v,
+            Err(e) => {
+                eprintln!("ghostport-udp: [{link_id}] recv failed: {e}");
+                continue;
+            }
+        };
+
+        let existing_tx = flows.lock().await.get(&src).cloned();
+        if let Some(tx) = existing_tx {
+            let _ = tx.send(buf[..n].to_vec()).await;
+            continue;
+        }
+
+        let (tx, rx) = mpsc::channel(16);
+        flows.lock().await.insert(src, tx);
+
+        let ctx = ctx.clone();
+        let link_id = link_id.clone();
+        let socket = socket.clone();
+        let flows = flows.clone();
+        let first_datagram = buf[..n].to_vec();
+        tokio::spawn(async move {
+            run_flow(&ctx, &link_id, socket, src, rx, first_datagram).await;
+            flows.lock().await.remove(&src);
+        });
+    }
+}
+
+/// One local flow's whole lifecycle: dial+handshake against the
+/// server, identify the link via `StreamHello`, then relay real
+/// payload both ways until idle or an error ends it. `first_datagram`
+/// is the local app's datagram that triggered this flow's creation —
+/// relayed as the first real payload once the tunnel is ready, not
+/// dropped or treated as anything handshake-related (it's plaintext
+/// app data; the handshake below is a wholly separate exchange with
+/// the server).
+async fn run_flow(
+    ctx: &Context,
+    link_id: &str,
+    local_socket: Arc<UdpSocket>,
+    local_addr: SocketAddr,
+    mut from_local: mpsc::Receiver<Vec<u8>>,
+    first_datagram: Vec<u8>,
+) {
+    let server_udp_addr = ctx
+        .config
+        .server_udp_addr
+        .clone()
+        .expect("validated: client role requires server_udp_addr when a udp link exists");
+
+    let tunnel_socket = match UdpSocket::bind("0.0.0.0:0").await {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("ghostport-udp: [{link_id}] {local_addr}: failed to open tunnel socket: {e}");
+            return;
+        }
+    };
+    if let Err(e) = tunnel_socket.connect(&server_udp_addr).await {
+        eprintln!(
+            "ghostport-udp: [{link_id}] {local_addr}: failed to connect to {server_udp_addr}: {e}"
+        );
+        return;
+    }
+
+    let handshake = match noise::initiator(&ctx.private_key, &ctx.peer_public_key) {
+        Ok(h) => h,
+        Err(e) => {
+            eprintln!("ghostport-udp: [{link_id}] {local_addr}: {e}");
+            return;
+        }
+    };
+    let poller = ConnectedPoller(tunnel_socket);
+    let mut noise_socket = match tokio::time::timeout(
+        HANDSHAKE_TIMEOUT,
+        NoiseSocket::handshake_with_verifier(poller, handshake, &mut (), ()),
+    )
+    .await
+    {
+        Ok(Ok(s)) => s,
+        Ok(Err(e)) => {
+            eprintln!("ghostport-udp: [{link_id}] {local_addr}: handshake failed: {e}");
+            return;
+        }
+        Err(_) => {
+            eprintln!("ghostport-udp: [{link_id}] {local_addr}: handshake timed out");
+            return;
+        }
+    };
+
+    let hello = StreamHello {
+        link_id: link_id.to_string(),
+        stream_id: None,
+    };
+    let Ok(hello_bytes) = serde_json::to_vec(&hello) else {
+        return;
+    };
+    if noise_socket.send(&hello_bytes).await.is_err() {
+        eprintln!("ghostport-udp: [{link_id}] {local_addr}: failed to send StreamHello");
+        return;
+    }
+    if noise_socket.send(&first_datagram).await.is_err() {
+        return;
+    }
+
+    println!("ghostport-udp: [{link_id}] flow from {local_addr} established");
+
+    loop {
+        tokio::select! {
+            from_local_msg = from_local.recv() => {
+                match from_local_msg {
+                    Some(bytes) => { let _ = noise_socket.send(&bytes).await; }
+                    None => break,
+                }
+            }
+            from_tunnel = noise_socket.recv() => {
+                match from_tunnel {
+                    Ok(bytes) => { let _ = local_socket.send_to(bytes, local_addr).await; }
+                    Err(_) => break,
+                }
+            }
+            () = tokio::time::sleep(FLOW_IDLE_TIMEOUT) => break,
+        }
+    }
+    println!("ghostport-udp: [{link_id}] flow from {local_addr} closed");
+}

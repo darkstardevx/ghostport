@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/ghostport-core"]
+members = ["crates/ghostport-core", "crates/ghostport-udp"]
 
 [package]
 name = "ghostport"
@@ -8,12 +8,24 @@ edition = "2021"
 description = "Encrypted, NAT-traversing port forwarder (Noise protocol) between a single pinned peer pair"
 license = "MIT"
 
+[features]
+# Genuinely optional -- ghostport-udp is the project's first real
+# plugin crate, proving ghostport-core's extraction actually works for
+# a second consumer. Not in `default` on purpose: UDP forwarding is
+# newer/less hardened than the original TCP path (see
+# crates/ghostport-udp's own docs for the stated v1 limitations), same
+# conservative-rollout stance as everything else in this project.
+udp = ["dep:ghostport-udp"]
+
 [dependencies]
 # The actual forwarding engine -- config schema, Noise handshake/peer
 # matching, the relay, the daemon roles. This crate (the binary) is
 # CLI/TUI glue over it: arg parsing, presentation, systemd helpers.
 # See crates/ghostport-core for why it's a separate crate.
 ghostport-core = { path = "crates/ghostport-core" }
+# The first real plugin crate -- UDP forwarding. Optional; see the
+# `udp` feature above.
+ghostport-udp = { path = "crates/ghostport-udp", optional = true }
 tokio = { version = "1.38", features = ["full"] }
 clap = { version = "4.5", features = ["derive"] }
 serde_json = "1.0"

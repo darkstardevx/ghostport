@@ -64,6 +64,15 @@ jobs:
         env:
           RUSTDOCFLAGS: "-D warnings"
 
+      - name: Strict rustdoc (ghostport-udp public API)
+        run: >
+          cargo doc
+          -p ghostport-udp
+          --no-deps
+          --all-features
+        env:
+          RUSTDOCFLAGS: "-D warnings"
+
   test:
     name: Tests
     runs-on: ubuntu-latest
