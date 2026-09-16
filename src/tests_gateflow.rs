@@ -117,13 +117,22 @@ fn forward_link_round_trips_across_real_network_namespaces() {
                         socket_path: scratch_socket_path("server"),
                     }));
 
-                    // No completion signal from the client side is exposed
-                    // by gateflow's API yet (Sandbox::paired's two closures
-                    // don't share memory once forked, and there's no IPC
-                    // channel surfaced to caller code) — wait long enough
-                    // for the client's own round trip to finish, then check
-                    // what actually happened via the shared stats.
-                    tokio::time::sleep(Duration::from_secs(3)).await;
+                    // Block on the client's real completion signal instead
+                    // of guessing how long its round trip takes with a
+                    // fixed sleep. wait_for_peer does a blocking sleep-poll
+                    // loop internally, so it runs on a blocking thread
+                    // rather than tying up the async runtime.
+                    let signaled = match tokio::task::spawn_blocking(move || {
+                        end.wait_for_peer(Duration::from_secs(5))
+                    })
+                    .await
+                    {
+                        Ok(Ok(signaled)) => signaled,
+                        _ => return 102,
+                    };
+                    if !signaled {
+                        return 103;
+                    }
 
                     if state.links["fwd"].total_streams.load(Ordering::Relaxed) != 1 {
                         return 93;
@@ -197,6 +206,13 @@ fn forward_link_round_trips_across_real_network_namespaces() {
 
                     if state.links["fwd"].total_streams.load(Ordering::Relaxed) != 1 {
                         return 101;
+                    }
+
+                    // Tell the server side we're done so it can check its
+                    // own stats immediately instead of guessing with a
+                    // fixed sleep.
+                    if end.signal_done().is_err() {
+                        return 104;
                     }
 
                     0
