@@ -53,6 +53,7 @@ client only ever needs outbound connectivity, never inbound.
 - **Transport wrapper**: [`snowstorm`](https://docs.rs/snowstorm) wraps the handshake + transport state around a `TcpStream`, producing a `NoiseStream` that's itself `AsyncRead + AsyncWrite` — so the actual bulk relay is just `tokio::io::copy_bidirectional`, no hand-rolled framing/encrypt-decrypt loop needed for that path.
 - **Control/handshake messages** (`Ping`/`Pong`/`OpenStream`, and the per-stream `StreamHello` identifying which link a tunnel belongs to) are small JSON payloads, length-prefixed on top of the already-encrypted stream (`framing.rs`).
 - **Keys**: generated with `ghostport keygen`, saved as sibling files (`identity.key` + `identity.key.pub`) exactly like SSH keypairs — the private key is locked to `0600` (self-healing on every save), the public key is meant to be copied into the peer's config.
+- **Fingerprints**: `keygen` and `check` both print a SHA-256 fingerprint (colon-grouped hex) alongside any key they handle — the same verification ritual as an SSH host key. The pinned key already makes the Noise handshake cryptographically refuse an impostor, but a single mistyped character in the 44-char base64 `peer_public_key` otherwise only surfaces later as an opaque "wrong key?" handshake failure; the fingerprint gives both sides something short to actually read aloud or compare side-by-side.
 
 ## 🚀 Commands
 
