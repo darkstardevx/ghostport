@@ -67,17 +67,20 @@ run_quick_gates() {
     run_gate \
         "Check (default features)" \
         cargo check \
+            --workspace \
             --all-targets
 
     run_gate \
         "Check (all features)" \
         cargo check \
+            --workspace \
             --all-targets \
             --all-features
 
     run_gate \
         "Clippy (default features)" \
         cargo clippy \
+            --workspace \
             --all-targets \
             -- \
             -D warnings
@@ -85,10 +88,19 @@ run_quick_gates() {
     run_gate \
         "Clippy (all features)" \
         cargo clippy \
+            --workspace \
             --all-targets \
             --all-features \
             -- \
             -D warnings
+
+    run_gate \
+        "Strict rustdoc (ghostport-core public API)" \
+        env RUSTDOCFLAGS="-D warnings" \
+        cargo doc \
+            -p ghostport-core \
+            --no-deps \
+            --all-features
 }
 
 run_full_gates() {
@@ -97,11 +109,13 @@ run_full_gates() {
     run_gate \
         "Tests (default features)" \
         cargo test \
+            --workspace \
             --all-targets
 
     run_gate \
-        "Tests (all features -- includes tests_gateflow.rs' real network-namespace tests)" \
+        "Tests (all features -- includes ghostport-core/tests/namespace_tests.rs' real network-namespace tests)" \
         cargo test \
+            --workspace \
             --all-targets \
             --all-features
 
