@@ -54,6 +54,10 @@ fn scratch_socket_path(role: &str) -> PathBuf {
     ))
 }
 
+fn gateflow_peer(public_key: Vec<u8>) -> crate::peermatch::ResolvedPeer {
+    crate::peermatch::ResolvedPeer { name: "client".to_string(), public_key, links: ["fwd", "rev"].map(String::from).into() }
+}
+
 #[test]
 fn forward_link_round_trips_across_real_network_namespaces() {
     let server_kp = keys::generate();
@@ -92,7 +96,8 @@ fn forward_link_round_trips_across_real_network_namespaces() {
                     let server_config = Config {
                         role: Role::Server,
                         private_key_path: PathBuf::new(),
-                        peer_public_key: keys::encode_public_key(&client_pub),
+                        peer_public_key: None,
+                        peers: vec![crate::config::PeerConfig { name: "client".to_string(), public_key: keys::encode_public_key(&client_pub), links: vec!["fwd".to_string()] }],
                         listen_control: Some(format!("{}:{CONTROL_PORT}", end.address)),
                         listen_data: Some(format!("{}:{DATA_PORT}", end.address)),
                         server_control_addr: None,
@@ -112,7 +117,7 @@ fn forward_link_round_trips_across_real_network_namespaces() {
                     tokio::spawn(server::run(server::Context {
                         config: Arc::new(server_config),
                         private_key: Arc::new(server_kp.private),
-                        peer_public_key: Arc::new(client_pub),
+                        peers: Arc::new(vec![gateflow_peer(client_pub)]),
                         state: state.clone(),
                         socket_path: scratch_socket_path("server"),
                     }));
@@ -155,7 +160,8 @@ fn forward_link_round_trips_across_real_network_namespaces() {
                     let client_config = Config {
                         role: Role::Client,
                         private_key_path: PathBuf::new(),
-                        peer_public_key: keys::encode_public_key(&server_pub),
+                        peer_public_key: Some(keys::encode_public_key(&server_pub)),
+                        peers: vec![],
                         listen_control: None,
                         listen_data: None,
                         server_control_addr: Some(format!("{}:{CONTROL_PORT}", end.peer_address)),

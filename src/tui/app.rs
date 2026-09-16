@@ -428,7 +428,8 @@ mod tests {
         let cfg = Config {
             role: Role::Client,
             private_key_path: PathBuf::from("/tmp/identity.key"),
-            peer_public_key: crate::keys::encode_public_key(&crate::keys::generate().public),
+            peer_public_key: Some(crate::keys::encode_public_key(&crate::keys::generate().public)),
+            peers: vec![],
             listen_control: None,
             listen_data: None,
             server_control_addr: Some("example.com:9000".to_string()),

@@ -114,7 +114,7 @@ async fn run_control_loop(ctx: Arc<Context>) {
         match connect_control(&ctx, &server_control_addr).await {
             Ok(mut noise_stream) => {
                 println!("ghostport: {}", theme::ok(&format!("control channel connected to {server_control_addr}")));
-                ctx.state.control.set_connected(server_control_addr.clone());
+                ctx.state.control.set_connected(server_control_addr.clone(), None);
                 backoff = Duration::from_secs(1);
                 run_control_session(&ctx, &mut noise_stream).await;
                 ctx.state.control.set_disconnected();

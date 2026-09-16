@@ -43,13 +43,19 @@ pub struct ControlStatus {
     /// "occasionally", not per-stream.
     connected_since: Mutex<Option<u64>>,
     peer_addr: Mutex<Option<String>>,
+    /// Which configured peer this connection matched, server-role only
+    /// (`None` on the client side — a client only ever has one server
+    /// to name, so there's nothing to disambiguate). Meaningful now
+    /// that a server can have more than one allowed peer.
+    peer_name: Mutex<Option<String>>,
 }
 
 impl ControlStatus {
-    pub fn set_connected(&self, peer_addr: String) {
+    pub fn set_connected(&self, peer_addr: String, peer_name: Option<String>) {
         self.connected.store(true, Ordering::Relaxed);
         *self.connected_since.lock().expect("not poisoned") = Some(now_unix());
         *self.peer_addr.lock().expect("not poisoned") = Some(peer_addr);
+        *self.peer_name.lock().expect("not poisoned") = peer_name;
     }
 
     pub fn set_disconnected(&self) {
@@ -88,6 +94,7 @@ impl SharedState {
                 .filter(|_| control_connected)
                 .map(|t| now_unix().saturating_sub(t)),
             control_peer_addr: self.control.peer_addr.lock().expect("not poisoned").clone(),
+            control_peer_name: self.control.peer_name.lock().expect("not poisoned").clone(),
             links: config
                 .links
                 .iter()
@@ -114,6 +121,7 @@ pub struct StatusSnapshot {
     pub control_connected: bool,
     pub control_connected_since_secs_ago: Option<u64>,
     pub control_peer_addr: Option<String>,
+    pub control_peer_name: Option<String>,
     pub links: Vec<LinkSnapshot>,
 }
 
@@ -128,7 +136,8 @@ mod tests {
         Config {
             role: Role::Server,
             private_key_path: PathBuf::new(),
-            peer_public_key: String::new(),
+            peer_public_key: None,
+            peers: vec![],
             listen_control: Some("0.0.0.0:9000".to_string()),
             listen_data: Some("0.0.0.0:9001".to_string()),
             server_control_addr: None,
@@ -171,10 +180,11 @@ mod tests {
         let cfg = sample_config();
         let state = SharedState::new(&cfg);
 
-        state.control.set_connected("1.2.3.4:5678".to_string());
+        state.control.set_connected("1.2.3.4:5678".to_string(), Some("alice".to_string()));
         let snap = state.snapshot(&cfg);
         assert!(snap.control_connected);
         assert_eq!(snap.control_peer_addr.as_deref(), Some("1.2.3.4:5678"));
+        assert_eq!(snap.control_peer_name.as_deref(), Some("alice"));
         assert!(snap.control_connected_since_secs_ago.is_some());
 
         state.control.set_disconnected();

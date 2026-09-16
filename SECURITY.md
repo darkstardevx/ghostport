@@ -12,7 +12,11 @@ What GhostPort's design actually defends against, and what it doesn't
   public key ahead of time. An attacker without the matching private
   key cannot complete the handshake at all; there's no separate
   "verify identity after the fact" step for them to bypass. This is
-  enforced by the cryptography itself, not a policy check.
+  enforced by the cryptography itself, not a policy check. A server
+  with several pinned peers (`src/peermatch.rs`) tries each allowed
+  key against an incoming handshake in turn — an unrecognized key
+  still can't complete the handshake against *any* of them, the same
+  guarantee extended to a list instead of one fixed key.
 - **Eavesdropping / traffic tampering.** Every byte relayed between
   peers — including the small control-channel messages
   (`Ping`/`Pong`/`OpenStream`) — travels only inside the
@@ -51,9 +55,16 @@ What GhostPort's design actually defends against, and what it doesn't
   triggers reconnect. A connection that's open but unresponsive
   without ever erroring won't be noticed. Documented, deliberate v1
   tradeoff (see README's Known limitations), not planned to change.
-- **Multiple peers.** GhostPort is built around exactly one pinned
-  peer pair. There's no allowlist, no revocation list, no per-peer
-  policy. If you need that, this isn't the right tool yet.
+- **Peer revocation while running, and per-peer rate limiting.** A
+  server can pin several peers (`peers` in its config), each restricted
+  to its own `links` — but removing a peer only takes effect on the
+  next restart (no live revocation), and Phase 1's connection-flood
+  limiter (`src/ratelimit.rs`) is shared across all peers on that
+  server, not tracked separately per identity. Reverse-mode links are
+  additionally bound by the pre-existing one-active-control-session-
+  at-a-time design — only whichever peer currently holds the control
+  connection can be signaled to fulfill a reverse-mode request;
+  forward-mode links have no such constraint.
 - **The host it runs on.** GhostPort assumes the machine it runs on
   isn't already compromised — it doesn't defend against a local
   attacker with access to the running process or its config/key files.
@@ -65,11 +76,16 @@ What GhostPort's design actually defends against, and what it doesn't
 
 ## Supported deployment model
 
-Single pinned peer pair, one role each (server/client). Not
-multi-tenant, and not designed for a shared/many-user deployment. If
-you're evaluating this for something bigger than "two machines you
-personally control talking to each other," the threat model above
-hasn't been validated for that.
+One server, one or more independently-pinned clients, each restricted
+to its own subset of links. Still not a general multi-tenant system:
+there's no live peer revocation, no per-peer rate-limit isolation
+(Phase 1's limiter is shared across every peer on a server), and
+reverse-mode links are still constrained by the single-active-control-
+session design (see above). This model works for "a handful of
+machines/people you personally trust and administer," not for
+onboarding untrusted or self-service users — if you're evaluating this
+for something closer to that, the threat model above hasn't been
+validated for it.
 
 ## Reporting a vulnerability
 

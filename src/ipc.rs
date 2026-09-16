@@ -93,7 +93,8 @@ mod tests {
         Config {
             role: Role::Server,
             private_key_path: PathBuf::new(),
-            peer_public_key: String::new(),
+            peer_public_key: None,
+            peers: vec![],
             listen_control: Some("0.0.0.0:9000".to_string()),
             listen_data: Some("0.0.0.0:9001".to_string()),
             server_control_addr: None,
@@ -114,7 +115,7 @@ mod tests {
         let path = scratch_socket_path("roundtrip");
         let config = sample_config();
         let state = Arc::new(SharedState::new(&config));
-        state.control.set_connected("9.9.9.9:1".to_string());
+        state.control.set_connected("9.9.9.9:1".to_string(), Some("alice".to_string()));
 
         let config = Arc::new(config);
         tokio::spawn(run_ipc_server(state, config, path.clone()));

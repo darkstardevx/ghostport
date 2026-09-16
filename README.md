@@ -28,9 +28,13 @@ Three real forks were resolved with the user before implementation:
    carrying many streams. Simpler, no custom stream-multiplexing
    protocol to get right; handshake overhead is sub-millisecond in
    practice.
-3. **Topology** — exactly one pinned peer pair (a "server" role, always
-   reachable; a "client" role, assumed to be behind NAT/unpredictable
-   networks), not a multi-peer allowlist.
+3. **Topology** — a "server" role, always reachable, and a "client"
+   role, assumed to be behind NAT/unpredictable networks. Originally
+   exactly one pinned peer pair; later extended to let a server accept
+   several distinct, independently-pinned client identities, each
+   restricted to its own subset of links (see "Multi-peer support"
+   below) — a client still pins exactly one server, no ambiguity to
+   resolve on that side.
 
 Combining (1) and (2) has a real consequence: true reverse tunneling
 needs the server to trigger a new stream on demand, but it can't dial
@@ -72,9 +76,13 @@ ghostport tui ~/.config/ghostport/config.toml                # interactive manag
 ```toml
 role = "server"
 private_key_path = "/home/you/.config/ghostport/identity.key"
-peer_public_key = "<the client's public key, from its keygen output>"
 listen_control = "0.0.0.0:9000"
 listen_data = "0.0.0.0:9001"
+
+[[peers]]
+name = "laptop"
+public_key = "<the laptop's public key, from its keygen output>"
+links = ["homedb", "laptop-dev"]
 
 [[links]]
 id = "homedb"
@@ -86,6 +94,30 @@ id = "laptop-dev"
 mode = "reverse"
 listen = "0.0.0.0:8080"        # server listens here for external users
 ```
+
+#### Multi-peer support
+
+A server can list more than one `[[peers]]` entry — each independently
+pinned, each restricted to its own `links` (an id not in a peer's list
+is simply unreachable to that peer, enforced server-side when a data
+tunnel's `StreamHello` names it, regardless of what that peer's own
+config claims to offer). `Noise_KK` needs the responder to already know
+the correct remote static key before it can process a handshake
+message at all — with more than one allowed peer, the server tries
+each configured key against the incoming handshake in turn until one
+matches (or none do); an unrecognized key still can't complete the
+handshake with *any* candidate, the same cryptographic guarantee as
+the single-peer case, just checked against a list. A client still pins
+exactly one server (`peer_public_key`, singular) — there's no ambiguity
+to resolve on the dialing side.
+
+Real constraint worth knowing: reverse-mode links are still bound by
+GhostPort's one-active-control-session-at-a-time design (unchanged by
+multi-peer support) — only whichever peer currently holds the control
+connection can be signaled to fulfill a reverse-mode request. Forward-
+mode links have no such constraint; each data tunnel authenticates and
+dials independently, so multiple peers can use their own forward links
+concurrently today.
 
 ### Example config — client (laptop, roams networks)
 
@@ -275,7 +307,13 @@ src/main.rs      CLI (keygen/check/run/status/tui) + integration tests
   reconnect until something else notices. Ping/Pong every 15s exists
   mainly to keep NAT mappings alive on unpredictable WiFi, not as a full
   liveness state machine.
-- Single pinned peer pair only — no multi-peer allowlist/revocation.
+- A server can pin several peers, but there's still no *revocation while
+  running* — removing a `[[peers]]` entry only takes effect on the next
+  restart, and no per-peer rate limiting beyond Phase 1's per-IP limiter
+  (shared across all peers on that server). Reverse-mode links are still
+  bound by the one-active-control-session-at-a-time design (see
+  "Multi-peer support" above) — not a limitation multi-peer support
+  introduced, just one it doesn't lift.
 - No persistent stream multiplexing — a burst of many simultaneous
   connections through one link means that many concurrent handshakes,
   not one shared pipe. Deliberate v1 tradeoff (see design decisions

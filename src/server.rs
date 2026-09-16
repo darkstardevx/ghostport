@@ -9,10 +9,11 @@
 //! accepting the next, rather than juggling concurrent sessions.
 
 use crate::config::{Config, LinkMode};
+use crate::peermatch::{self, ResolvedPeer};
 use crate::protocol::{ControlMessage, StreamHello};
 use crate::ratelimit::HandshakeLimiter;
 use crate::stats::SharedState;
-use crate::{framing, ipc, noise, relay, theme};
+use crate::{framing, ipc, relay, theme};
 use snowstorm::NoiseStream;
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -39,7 +40,13 @@ type PendingStreams = Arc<Mutex<HashMap<u64, TcpStream>>>;
 pub struct Context {
     pub config: Arc<Config>,
     pub private_key: Arc<Vec<u8>>,
-    pub peer_public_key: Arc<Vec<u8>>,
+    /// Every client identity this server accepts. `Noise_KK` needs the
+    /// correct remote static key loaded before a handshake message can
+    /// be processed at all, so with more than one entry the server
+    /// tries each in turn against the incoming handshake (see
+    /// `peermatch::match_peer`) rather than learning the identity
+    /// mid-handshake the way `IK`/`XX` would.
+    pub peers: Arc<Vec<ResolvedPeer>>,
     pub state: Arc<SharedState>,
     /// Where this instance's status IPC socket lives. Not always the
     /// default — running both roles on one machine (e.g. a local demo)
@@ -120,8 +127,9 @@ async fn spawn_reverse_listener(link_id: String, listen_addr: String, pending: P
 }
 
 /// A connection that's completed its Noise handshake, handed from the
-/// acceptor task to the session processor below.
-type AuthenticatedControlConn = (NoiseStream<TcpStream>, std::net::SocketAddr);
+/// acceptor task to the session processor below, along with which
+/// configured peer it matched.
+type AuthenticatedControlConn = (NoiseStream<TcpStream>, std::net::SocketAddr, String);
 
 async fn run_control_accept_loop(ctx: Arc<Context>, listen_addr: String, mut open_stream_rx: mpsc::Receiver<ControlMessage>, limiter: Arc<HandshakeLimiter>) {
     let listener = match TcpListener::bind(&listen_addr).await {
@@ -162,24 +170,24 @@ async fn run_control_accept_loop(ctx: Arc<Context>, listen_addr: String, mut ope
                 continue;
             };
 
-            let handshake = match noise::responder(&accept_ctx.private_key, &accept_ctx.peer_public_key) {
-                Ok(h) => h,
-                Err(e) => {
-                    eprintln!("ghostport: {}", theme::err(&format!("control: failed to build handshake state: {e}")));
-                    continue;
-                }
-            };
-
             let authenticated_tx = authenticated_tx.clone();
+            let private_key = accept_ctx.private_key.clone();
+            let peers = accept_ctx.peers.clone();
             tokio::spawn(async move {
-                let result = tokio::time::timeout(HANDSHAKE_TIMEOUT, NoiseStream::handshake(tcp, handshake)).await;
+                let mut tcp = tcp;
+                let result = tokio::time::timeout(HANDSHAKE_TIMEOUT, async {
+                    let (peer_index, state) = peermatch::match_peer(&mut tcp, &private_key, &peers).await.map_err(|e| e.to_string())?;
+                    let stream = NoiseStream::handshake(tcp, state).await.map_err(|e| e.to_string())?;
+                    Ok::<_, String>((stream, peer_index))
+                })
+                .await;
                 drop(permit);
                 match result {
-                    Ok(Ok(stream)) => {
-                        let _ = authenticated_tx.send((stream, peer_addr)).await;
+                    Ok(Ok((stream, peer_index))) => {
+                        let _ = authenticated_tx.send((stream, peer_addr, peers[peer_index].name.clone())).await;
                     }
                     Ok(Err(e)) => {
-                        eprintln!("ghostport: {}", theme::err(&format!("control: handshake with {peer_addr} failed (wrong key?): {e}")));
+                        eprintln!("ghostport: {}", theme::err(&format!("control: handshake with {peer_addr} failed: {e}")));
                     }
                     Err(_) => {
                         eprintln!("ghostport: {}", theme::warn(&format!("control: handshake with {peer_addr} timed out")));
@@ -189,9 +197,9 @@ async fn run_control_accept_loop(ctx: Arc<Context>, listen_addr: String, mut ope
         }
     });
 
-    while let Some((noise_stream, peer_addr)) = authenticated_rx.recv().await {
-        println!("ghostport: {}", theme::ok(&format!("control channel connected from {peer_addr}")));
-        ctx.state.control.set_connected(peer_addr.to_string());
+    while let Some((noise_stream, peer_addr, peer_name)) = authenticated_rx.recv().await {
+        println!("ghostport: {}", theme::ok(&format!("control channel connected from {peer_addr} (peer \"{peer_name}\")")));
+        ctx.state.control.set_connected(peer_addr.to_string(), Some(peer_name));
 
         let (mut read_half, mut write_half) = tokio::io::split(noise_stream);
         run_control_session(&mut read_half, &mut write_half, &mut open_stream_rx).await;
@@ -261,15 +269,25 @@ async fn run_data_accept_loop(ctx: Arc<Context>, listen_addr: String, pending: P
     }
 }
 
-async fn handle_data_connection(ctx: Arc<Context>, tcp: TcpStream, pending: PendingStreams, permit: OwnedSemaphorePermit) -> std::io::Result<()> {
-    let handshake = noise::responder(&ctx.private_key, &ctx.peer_public_key).map_err(std::io::Error::other)?;
-    let mut tunnel = match tokio::time::timeout(HANDSHAKE_TIMEOUT, NoiseStream::handshake(tcp, handshake)).await {
-        Ok(Ok(s)) => s,
+async fn handle_data_connection(ctx: Arc<Context>, mut tcp: TcpStream, pending: PendingStreams, permit: OwnedSemaphorePermit) -> std::io::Result<()> {
+    let (peer_index, mut tunnel) = match tokio::time::timeout(HANDSHAKE_TIMEOUT, async {
+        let (peer_index, state) = peermatch::match_peer(&mut tcp, &ctx.private_key, &ctx.peers).await.map_err(|e| e.to_string())?;
+        let stream = NoiseStream::handshake(tcp, state).await.map_err(|e| e.to_string())?;
+        Ok::<_, String>((peer_index, stream))
+    })
+    .await
+    {
+        Ok(Ok(v)) => v,
         Ok(Err(e)) => return Err(std::io::Error::other(e)),
         Err(_) => return Err(std::io::Error::new(std::io::ErrorKind::TimedOut, "handshake timed out")),
     };
     drop(permit);
+    let matched_peer = &ctx.peers[peer_index];
     let hello: StreamHello = framing::recv_json(&mut tunnel).await?;
+
+    if !matched_peer.links.contains(&hello.link_id) {
+        return Err(std::io::Error::other(format!("peer \"{}\" is not authorized for link \"{}\"", matched_peer.name, hello.link_id)));
+    }
 
     let Some(link) = ctx.config.links.iter().find(|l| l.id == hello.link_id) else {
         return Err(std::io::Error::other(format!("unknown link id \"{}\"", hello.link_id)));
