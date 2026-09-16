@@ -45,8 +45,13 @@ type FlowMap = Arc<Mutex<HashMap<SocketAddr, mpsc::Sender<Vec<u8>>>>>;
 
 /// Runs the UDP client role: starts one local listen socket per
 /// UDP-transport forward link and demuxes it into per-flow sessions.
-/// Runs until the process exits (or until every started listener task
-/// exits, which doesn't happen under normal operation).
+/// Runs until the process exits -- including when no link uses UDP at
+/// all (`listeners` stays empty): this still never returns. Returning
+/// `Ok(())` there would be wrong, not just pointless -- `main.rs`
+/// races this against the real `ghostport_core` daemon via
+/// `tokio::select!`, and an early return here would look like "the
+/// daemon is done" and tear the real one down (see the matching
+/// comment in `server.rs::run`, which hit this same real bug first).
 pub async fn run(ctx: Context) -> std::io::Result<()> {
     let ctx = Arc::new(ctx);
     let mut listeners = tokio::task::JoinSet::new();
@@ -65,8 +70,14 @@ pub async fn run(ctx: Context) -> std::io::Result<()> {
         }
     }
 
+    // Waits for every spawned listener to end -- including the
+    // "there were none to begin with" case, where this returns
+    // immediately. Either way, never actually return Ok(()) below:
+    // a listener ending (crashed, or there was nothing to spawn) is
+    // not "the client is done."
     while listeners.join_next().await.is_some() {}
-    Ok(())
+    std::future::pending::<()>().await;
+    unreachable!("pending() never resolves")
 }
 
 async fn run_forward_listener(ctx: Arc<Context>, link_id: String, listen_addr: String) {
@@ -211,4 +222,52 @@ async fn run_flow(
         }
     }
     println!("ghostport-udp: [{link_id}] flow from {local_addr} closed");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ghostport_core::config::Role;
+    use ghostport_core::keys;
+    use std::path::PathBuf;
+
+    fn empty_client_config() -> Config {
+        Config {
+            role: Role::Client,
+            private_key_path: PathBuf::new(),
+            peer_public_key: None,
+            peers: vec![],
+            listen_control: None,
+            listen_data: None,
+            listen_udp: None,
+            server_control_addr: None,
+            server_data_addr: None,
+            server_udp_addr: None,
+            links: vec![],
+        }
+    }
+
+    /// The client-side twin of `server::run`'s own regression test: a
+    /// real bug caught by a smoke test, not a unit test. With no
+    /// UDP-transport forward link configured, `run` used to return
+    /// `Ok(())` immediately (an empty `JoinSet` resolves `join_next()`
+    /// to `None` right away). `main.rs` races this against the real
+    /// `ghostport_core::client::run` via `tokio::select!` when the
+    /// `udp` feature is enabled -- an early return here tore down the
+    /// real daemon the moment it started, for any TCP-only config built
+    /// with `--features udp`.
+    #[tokio::test]
+    async fn run_never_returns_when_no_link_uses_udp() {
+        let ctx = Context {
+            config: Arc::new(empty_client_config()),
+            private_key: Arc::new(keys::generate().private),
+            peer_public_key: Arc::new(keys::generate().public),
+        };
+        let result = tokio::time::timeout(Duration::from_millis(500), run(ctx)).await;
+        assert!(
+            result.is_err(),
+            "run() must never resolve on its own when no link uses UDP -- \
+             it must block forever, not return Ok(())"
+        );
+    }
 }

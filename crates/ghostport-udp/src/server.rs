@@ -58,12 +58,18 @@ type SessionMap = Arc<Mutex<HashMap<SocketAddr, mpsc::Sender<Vec<u8>>>>>;
 /// Runs the UDP server role: binds the shared socket and demuxes every
 /// incoming datagram by source address, spawning a fresh Noise session
 /// for an unrecognized address and routing known addresses' datagrams
-/// into their session's channel. Runs until the process exits, or
-/// returns immediately if `listen_udp` isn't set (no link actually
-/// uses UDP, nothing to do).
+/// into their session's channel. Runs until the process exits --
+/// including when `listen_udp` isn't set (no link actually uses UDP):
+/// this still never returns, it just has nothing to do. Returning
+/// `Ok(())` there would be wrong, not just pointless -- `main.rs`
+/// races this against the real `ghostport_core` daemon via
+/// `tokio::select!`, and an early return here would look like "the
+/// daemon is done" and tear the real one down (a real bug this
+/// crate's own real-daemon wiring hit before this comment existed).
 pub async fn run(ctx: Context) -> std::io::Result<()> {
     let Some(listen_addr) = ctx.config.listen_udp.clone() else {
-        return Ok(());
+        std::future::pending::<()>().await;
+        unreachable!("pending() never resolves");
     };
     let socket = Arc::new(UdpSocket::bind(&listen_addr).await?);
     println!("ghostport-udp: listening on {listen_addr}");
@@ -344,5 +350,28 @@ mod tests {
         );
         // The first datagram is still there, untouched by the failed send.
         assert_eq!(rx.try_recv().unwrap(), vec![1]);
+    }
+
+    /// A real bug caught by an actual smoke test, not a unit test: with
+    /// no `listen_udp` set (no link uses UDP), `run` used to return
+    /// `Ok(())` immediately. `main.rs` races this function against the
+    /// real `ghostport_core::server::run` via `tokio::select!` when the
+    /// `udp` feature is enabled -- an early return here won that race
+    /// instantly and tore down the *real* daemon the moment it started,
+    /// for any TCP-only config built with `--features udp`. Proves the
+    /// fix: `run` must never resolve when there's nothing for it to do.
+    #[tokio::test]
+    async fn run_never_returns_when_no_link_uses_udp() {
+        let ctx = Context {
+            config: Arc::new(empty_server_config()),
+            private_key: Arc::new(keys::generate().private),
+            peers: Arc::new(vec![]),
+        };
+        let result = tokio::time::timeout(Duration::from_millis(500), run(ctx)).await;
+        assert!(
+            result.is_err(),
+            "run() must never resolve on its own when no link uses UDP -- \
+             it must block forever, not return Ok(())"
+        );
     }
 }
