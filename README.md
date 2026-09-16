@@ -269,7 +269,9 @@ check`. Run the same gates locally before pushing:
 ./scripts/release-gates full    # + tests + cargo-deny
 ```
 
-81 tests. Per-module unit tests: config validation (every (role, mode)
+120 tests across the workspace (`ghostport-core` + all three plugin
+crates). `ghostport-core`'s own suite: per-module unit tests for config
+validation (every (role, mode)
 ⇄ required-field combination, duplicate ids, bad addresses, TOML
 round-trip, `save()` refusing an invalid config and never touching disk
 when it does), key generation/save/load/permissions, the JSON framing
@@ -302,6 +304,15 @@ and returned correct live data; `tui` confirmed to fail gracefully
 (clear error, no panic) when there's no real TTY — same documented
 limitation as every other interactive tool built this session.
 
+Each plugin has its own real test suite: `ghostport-udp` (real UDP
+sockets, real `Noise_KK` handshakes end to end, plus regression tests
+for both a resource-leak and a head-of-line-blocking bug it once had);
+`ghostport-metrics` (a real running daemon + a real running metrics
+HTTP server + real HTTP requests); `ghostport-firewall` (real log-line
+extraction through real ANSI color codes, `nft.rs` itself verified by
+hand against a real `nft` binary rather than automated, since it needs
+`CAP_NET_ADMIN` this CI environment doesn't grant).
+
 **Supply chain**: `cargo deny check` ([`deny.toml`](deny.toml)) runs
 the dependency tree against RustSec's real advisory database (known
 vulnerabilities), an explicit license allow-list (MIT/Apache-2.0/BSD/
@@ -311,22 +322,40 @@ source — install with `cargo install cargo-deny --locked`, run with
 
 ## 🧩 Layout
 
+A Cargo workspace: the `ghostport` binary (CLI/TUI/systemd glue) plus a
+library crate holding the actual engine, plus three optional plugin
+crates that each depend on `ghostport-core` a genuinely different way.
+
 ```
-src/keys.rs      static keypair generation/save/load, 0600 permissions
-src/noise.rs     Noise_KK handshake state construction
-src/theme.rs     shared ANSI color helpers for the CLI + daemon logs
-src/config.rs    TOML schema + validation + save()
-src/stats.rs     live runtime counters (atomics), StatusSnapshot
-src/ipc.rs       Unix-socket status server + client query
-src/protocol.rs  ControlMessage / StreamHello
-src/framing.rs   length-prefixed JSON over any AsyncRead/AsyncWrite
-src/relay.rs     bidirectional byte relay (tokio::io::copy_bidirectional), updates stats
-src/server.rs    server role: accepts control + data connections, reverse-mode listeners
-src/client.rs    client role: control-channel reconnect loop, forward-mode listeners
-src/tui/         management console (ratatui): app.rs (state), ui.rs (rendering),
-                 mod.rs (event loop, systemctl/journalctl, embedded unit file),
-                 templates.rs (link templates), format.rs (duration/bytes/rate)
-src/main.rs      CLI (keygen/check/run/status/tui) + integration tests
+crates/ghostport-core/     the forwarding engine -- no CLI/TUI dependencies
+  src/keys.rs                 static keypair generation/save/load, 0600 permissions
+  src/noise.rs                Noise_KK handshake state construction
+  src/theme.rs                shared ANSI color helpers for the CLI + daemon logs
+  src/config.rs               TOML schema + validation + save()
+  src/stats.rs                live runtime counters (atomics), StatusSnapshot
+  src/ipc.rs                  Unix-socket status server + client query
+  src/peermatch.rs            multi-peer Noise_KK candidate matching
+  src/protocol.rs             ControlMessage / StreamHello
+  src/framing.rs              length-prefixed JSON over any AsyncRead/AsyncWrite
+  src/ratelimit.rs            per-IP/global handshake-flood limiter
+  src/relay.rs                bidirectional byte relay, updates stats
+  src/server.rs               server role: control/data accept loops, reverse-mode listeners
+  src/client.rs               client role: control-channel reconnect loop, forward-mode listeners
+  tests/                      real end-to-end integration tests (loopback + real network namespaces)
+
+crates/ghostport-udp/       plugin: UDP forwarding, forward-mode v1 (off-by-default `udp` feature
+                            on the `ghostport` binary -- the only plugin linked into it directly)
+
+crates/ghostport-metrics/  plugin: Prometheus exporter -- separate sidecar binary,
+                            polls the existing status IPC socket, no ghostport-core changes
+
+crates/ghostport-firewall/ plugin: active blackholing via nftables -- separate sidecar
+                            binary, watches the daemon's journal, needs CAP_NET_ADMIN
+
+src/main.rs                 CLI (keygen/check/run/status/tui)
+src/tui/                    management console (ratatui): app.rs (state), ui.rs (rendering),
+                             mod.rs (event loop, systemctl/journalctl, embedded unit file),
+                             templates.rs (link templates), format.rs (duration/bytes/rate)
 ```
 
 ## 🗺 Known limitations
