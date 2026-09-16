@@ -14,5 +14,37 @@ Restart=on-failure
 RestartSec=5
 TimeoutStopSec=10
 
+# Sandboxing. Actual runtime file footprint: reads
+# ~/.config/ghostport/{config.toml,identity.key} (read-only, already
+# covered by ProtectHome=read-only below), writes only its status IPC
+# socket under ~/.local/state/ghostport (ipc.rs). Never binds a
+# privileged (<1024) port, so no capability is needed at all.
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+# The exact ghostport subdirectory is created on demand by the daemon
+# itself (ipc.rs::run_ipc_server) and may not exist yet on a fresh
+# install -- ReadWritePaths requires its target to already exist, so
+# this grants the parent XDG state directory (which reliably exists on
+# any normal user account) rather than gambling on that ordering.
+#
+# Hardcoded rather than %h -- verified via a real run that %h resolved
+# to /root here despite User=raven being set (systemctl show printed
+# ReadWritePaths=/root/.local/state), silently granting write access to
+# the wrong directory entirely and leaving the real IPC socket bind
+# broken. Matches this file's existing convention of hardcoded absolute
+# paths (WorkingDirectory, ExecStart) rather than introducing the only
+# specifier-based path in the file.
+ReadWritePaths=/home/raven/.local/state
+PrivateTmp=true
+CapabilityBoundingSet=
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+MemoryDenyWriteExecute=true
+LockPersonality=true
+RestrictRealtime=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+
 [Install]
 WantedBy=multi-user.target
