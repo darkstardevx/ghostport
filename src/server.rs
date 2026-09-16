@@ -10,6 +10,7 @@
 
 use crate::config::{Config, LinkMode};
 use crate::protocol::{ControlMessage, StreamHello};
+use crate::ratelimit::HandshakeLimiter;
 use crate::stats::SharedState;
 use crate::{framing, ipc, noise, relay, theme};
 use snowstorm::NoiseStream;
@@ -20,7 +21,13 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::io::{ReadHalf, WriteHalf};
 use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::{mpsc, Mutex};
+use tokio::sync::{mpsc, Mutex, OwnedSemaphorePermit};
+
+/// How long a handshake attempt (Noise handshake, or the underlying TCP
+/// connect for the client) is allowed to sit before it's abandoned. A
+/// peer that opens a connection and never sends a byte would otherwise
+/// hold the handshake — and its task — open indefinitely.
+const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// Streams accepted on a `reverse`-mode link's listener, waiting to be
 /// claimed by a data-tunnel connection the client dials in response to
@@ -48,6 +55,7 @@ pub async fn run(ctx: Context) -> std::io::Result<()> {
     let pending: PendingStreams = Arc::new(Mutex::new(HashMap::new()));
     let next_stream_id = Arc::new(AtomicU64::new(1));
     let (open_stream_tx, open_stream_rx) = mpsc::channel::<ControlMessage>(32);
+    let limiter = HandshakeLimiter::new();
 
     for link in &ctx.config.links {
         if link.mode == LinkMode::Reverse {
@@ -62,8 +70,10 @@ pub async fn run(ctx: Context) -> std::io::Result<()> {
     let ctx_control = ctx_data.clone();
     let pending_data = pending.clone();
 
-    let control_task = tokio::spawn(async move { run_control_accept_loop(ctx_control, listen_control, open_stream_rx).await });
-    let data_task = tokio::spawn(async move { run_data_accept_loop(ctx_data, listen_data, pending_data).await });
+    let control_limiter = limiter.clone();
+    let data_limiter = limiter;
+    let control_task = tokio::spawn(async move { run_control_accept_loop(ctx_control, listen_control, open_stream_rx, control_limiter).await });
+    let data_task = tokio::spawn(async move { run_data_accept_loop(ctx_data, listen_data, pending_data, data_limiter).await });
 
     let _ = tokio::join!(control_task, data_task, ipc_task);
     Ok(())
@@ -109,7 +119,11 @@ async fn spawn_reverse_listener(link_id: String, listen_addr: String, pending: P
     }
 }
 
-async fn run_control_accept_loop(ctx: Arc<Context>, listen_addr: String, mut open_stream_rx: mpsc::Receiver<ControlMessage>) {
+/// A connection that's completed its Noise handshake, handed from the
+/// acceptor task to the session processor below.
+type AuthenticatedControlConn = (NoiseStream<TcpStream>, std::net::SocketAddr);
+
+async fn run_control_accept_loop(ctx: Arc<Context>, listen_addr: String, mut open_stream_rx: mpsc::Receiver<ControlMessage>, limiter: Arc<HandshakeLimiter>) {
     let listener = match TcpListener::bind(&listen_addr).await {
         Ok(l) => l,
         Err(e) => {
@@ -119,29 +133,63 @@ async fn run_control_accept_loop(ctx: Arc<Context>, listen_addr: String, mut ope
     };
     println!("ghostport: {}", theme::ok(&format!("control channel listening on {listen_addr}")));
 
-    loop {
-        let (tcp, peer_addr) = match listener.accept().await {
-            Ok(v) => v,
-            Err(e) => {
-                eprintln!("ghostport: {}", theme::err(&format!("control accept failed: {e}")));
-                continue;
-            }
-        };
+    // Accepting and handshaking happen in their own spawned task per
+    // connection rather than inline in this loop -- a connection that
+    // opens a socket and never sends a byte would otherwise hold up
+    // *every* subsequent accept (including the real peer's) for up to
+    // HANDSHAKE_TIMEOUT each time, since a naive single loop can't move
+    // on to accept() again until the current handshake attempt resolves.
+    // The rate limiter above only has teeth if bogus connections can't
+    // starve it of the chance to even run. Sessions themselves are still
+    // processed strictly one at a time below -- that part of the
+    // original design (single pinned peer pair, only one session is
+    // ever meaningful) is unchanged, just decoupled from accept-loop
+    // liveness.
+    let (authenticated_tx, mut authenticated_rx) = mpsc::channel::<AuthenticatedControlConn>(4);
+    let accept_ctx = ctx.clone();
+    tokio::spawn(async move {
+        loop {
+            let (tcp, peer_addr) = match listener.accept().await {
+                Ok(v) => v,
+                Err(e) => {
+                    eprintln!("ghostport: {}", theme::err(&format!("control accept failed: {e}")));
+                    continue;
+                }
+            };
 
-        let handshake = match noise::responder(&ctx.private_key, &ctx.peer_public_key) {
-            Ok(h) => h,
-            Err(e) => {
-                eprintln!("ghostport: {}", theme::err(&format!("control: failed to build handshake state: {e}")));
+            let Some(permit) = limiter.try_acquire(peer_addr.ip()).await else {
+                eprintln!("ghostport: {}", theme::warn(&format!("control: rejected {peer_addr} (too many recent handshake attempts)")));
                 continue;
-            }
-        };
-        let noise_stream = match NoiseStream::handshake(tcp, handshake).await {
-            Ok(s) => s,
-            Err(e) => {
-                eprintln!("ghostport: {}", theme::err(&format!("control: handshake with {peer_addr} failed (wrong key?): {e}")));
-                continue;
-            }
-        };
+            };
+
+            let handshake = match noise::responder(&accept_ctx.private_key, &accept_ctx.peer_public_key) {
+                Ok(h) => h,
+                Err(e) => {
+                    eprintln!("ghostport: {}", theme::err(&format!("control: failed to build handshake state: {e}")));
+                    continue;
+                }
+            };
+
+            let authenticated_tx = authenticated_tx.clone();
+            tokio::spawn(async move {
+                let result = tokio::time::timeout(HANDSHAKE_TIMEOUT, NoiseStream::handshake(tcp, handshake)).await;
+                drop(permit);
+                match result {
+                    Ok(Ok(stream)) => {
+                        let _ = authenticated_tx.send((stream, peer_addr)).await;
+                    }
+                    Ok(Err(e)) => {
+                        eprintln!("ghostport: {}", theme::err(&format!("control: handshake with {peer_addr} failed (wrong key?): {e}")));
+                    }
+                    Err(_) => {
+                        eprintln!("ghostport: {}", theme::warn(&format!("control: handshake with {peer_addr} timed out")));
+                    }
+                }
+            });
+        }
+    });
+
+    while let Some((noise_stream, peer_addr)) = authenticated_rx.recv().await {
         println!("ghostport: {}", theme::ok(&format!("control channel connected from {peer_addr}")));
         ctx.state.control.set_connected(peer_addr.to_string());
 
@@ -179,7 +227,7 @@ async fn run_control_session(
     }
 }
 
-async fn run_data_accept_loop(ctx: Arc<Context>, listen_addr: String, pending: PendingStreams) {
+async fn run_data_accept_loop(ctx: Arc<Context>, listen_addr: String, pending: PendingStreams, limiter: Arc<HandshakeLimiter>) {
     let listener = match TcpListener::bind(&listen_addr).await {
         Ok(l) => l,
         Err(e) => {
@@ -197,19 +245,30 @@ async fn run_data_accept_loop(ctx: Arc<Context>, listen_addr: String, pending: P
                 continue;
             }
         };
+
+        let Some(permit) = limiter.try_acquire(peer_addr.ip()).await else {
+            eprintln!("ghostport: {}", theme::warn(&format!("data: rejected {peer_addr} (too many recent handshake attempts)")));
+            continue;
+        };
+
         let ctx = ctx.clone();
         let pending = pending.clone();
         tokio::spawn(async move {
-            if let Err(e) = handle_data_connection(ctx, tcp, pending).await {
+            if let Err(e) = handle_data_connection(ctx, tcp, pending, permit).await {
                 eprintln!("ghostport: {}", theme::err(&format!("data connection from {peer_addr}: {e}")));
             }
         });
     }
 }
 
-async fn handle_data_connection(ctx: Arc<Context>, tcp: TcpStream, pending: PendingStreams) -> std::io::Result<()> {
+async fn handle_data_connection(ctx: Arc<Context>, tcp: TcpStream, pending: PendingStreams, permit: OwnedSemaphorePermit) -> std::io::Result<()> {
     let handshake = noise::responder(&ctx.private_key, &ctx.peer_public_key).map_err(std::io::Error::other)?;
-    let mut tunnel = NoiseStream::handshake(tcp, handshake).await.map_err(std::io::Error::other)?;
+    let mut tunnel = match tokio::time::timeout(HANDSHAKE_TIMEOUT, NoiseStream::handshake(tcp, handshake)).await {
+        Ok(Ok(s)) => s,
+        Ok(Err(e)) => return Err(std::io::Error::other(e)),
+        Err(_) => return Err(std::io::Error::new(std::io::ErrorKind::TimedOut, "handshake timed out")),
+    };
+    drop(permit);
     let hello: StreamHello = framing::recv_json(&mut tunnel).await?;
 
     let Some(link) = ctx.config.links.iter().find(|l| l.id == hello.link_id) else {

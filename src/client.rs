@@ -15,6 +15,12 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::net::{TcpListener, TcpStream};
 
+/// Mirrors `server::HANDSHAKE_TIMEOUT` — a hung dial (e.g. a network
+/// intermediary that accepts the TCP connection but never completes the
+/// Noise exchange) would otherwise block the client's connect path
+/// indefinitely.
+const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
+
 pub struct Context {
     pub config: Arc<Config>,
     pub private_key: Arc<Vec<u8>>,
@@ -80,7 +86,10 @@ async fn dial_data_tunnel_and_relay(ctx: &Context, link_id: &str, stream_id: Opt
     let server_data_addr = ctx.config.server_data_addr.clone().expect("validated: client role requires server_data_addr");
     let tcp = TcpStream::connect(&server_data_addr).await?;
     let handshake = noise::initiator(&ctx.private_key, &ctx.peer_public_key).map_err(std::io::Error::other)?;
-    let mut tunnel = NoiseStream::handshake(tcp, handshake).await.map_err(std::io::Error::other)?;
+    let mut tunnel = match tokio::time::timeout(HANDSHAKE_TIMEOUT, NoiseStream::handshake(tcp, handshake)).await {
+        Ok(result) => result.map_err(std::io::Error::other)?,
+        Err(_) => return Err(std::io::Error::new(std::io::ErrorKind::TimedOut, "handshake timed out")),
+    };
     framing::send_json(&mut tunnel, &StreamHello { link_id: link_id.to_string(), stream_id }).await?;
     let stats = ctx.state.links.get(link_id).expect("state's link map is built from this same config");
     relay::relay(link_id, stats, tunnel, local_conn).await;
@@ -123,7 +132,10 @@ async fn run_control_loop(ctx: Arc<Context>) {
 async fn connect_control(ctx: &Context, addr: &str) -> std::io::Result<NoiseStream<TcpStream>> {
     let tcp = TcpStream::connect(addr).await?;
     let handshake = noise::initiator(&ctx.private_key, &ctx.peer_public_key).map_err(std::io::Error::other)?;
-    NoiseStream::handshake(tcp, handshake).await.map_err(std::io::Error::other)
+    match tokio::time::timeout(HANDSHAKE_TIMEOUT, NoiseStream::handshake(tcp, handshake)).await {
+        Ok(result) => result.map_err(std::io::Error::other),
+        Err(_) => Err(std::io::Error::new(std::io::ErrorKind::TimedOut, "handshake timed out")),
+    }
 }
 
 async fn run_control_session(ctx: &Arc<Context>, noise_stream: &mut NoiseStream<TcpStream>) {

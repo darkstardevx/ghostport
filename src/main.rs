@@ -5,6 +5,7 @@ mod ipc;
 mod keys;
 mod noise;
 mod protocol;
+mod ratelimit;
 mod relay;
 mod server;
 mod stats;
@@ -464,5 +465,71 @@ mod integration_tests {
         let handshake = noise::initiator(&client_kp.private, &impostor_kp.public).unwrap();
         let result = snowstorm::NoiseStream::handshake(tcp, handshake).await;
         assert!(result.is_err(), "handshake must fail against the wrong pinned key");
+    }
+
+    /// Proves the rate limiter added in `ratelimit.rs` is actually wired
+    /// into the real control listener, not just correct in isolation:
+    /// opens more raw TCP connections from one source than the per-IP
+    /// budget allows, and confirms the excess connection is dropped by
+    /// the server *before* it ever gets a handshake attempt — not queued
+    /// or left open pending one. Distinguished by how fast the server
+    /// closes it: a connection admitted into the handshake path would
+    /// stay open for up to `server::HANDSHAKE_TIMEOUT` (10s) waiting for
+    /// bytes we never send; a rejected one is closed almost immediately.
+    #[tokio::test]
+    async fn control_listener_rejects_connections_beyond_the_per_ip_rate_limit() {
+        let server_kp = keys::generate();
+        let client_kp = keys::generate();
+
+        let control_port = free_port();
+        let data_port = free_port();
+
+        let server_config = Config {
+            role: Role::Server,
+            private_key_path: std::path::PathBuf::new(),
+            peer_public_key: keys::encode_public_key(&client_kp.public),
+            listen_control: Some(format!("127.0.0.1:{control_port}")),
+            listen_data: Some(format!("127.0.0.1:{data_port}")),
+            server_control_addr: None,
+            server_data_addr: None,
+            links: vec![],
+        };
+        let state = Arc::new(stats::SharedState::new(&server_config));
+        tokio::spawn(server::run(server::Context {
+            config: Arc::new(server_config),
+            private_key: Arc::new(server_kp.private),
+            peer_public_key: Arc::new(client_kp.public.clone()),
+            state,
+            socket_path: scratch_socket_path("ratelimit"),
+        }));
+
+        let control_addr = format!("127.0.0.1:{control_port}");
+
+        // Consume the per-IP budget with plain TCP connects -- no Noise
+        // handshake needed, the limiter runs before that ever starts.
+        // Spaced slightly apart so the server's accept loop has
+        // processed each one (and updated the shared per-IP counter)
+        // before the next is opened, rather than racing several accepts
+        // against one one-at-a-time counter update.
+        let mut budget_conns = Vec::new();
+        for _ in 0..ratelimit::MAX_ATTEMPTS_PER_WINDOW {
+            let sock = connect_with_retry(&control_addr, Duration::from_secs(5)).await;
+            budget_conns.push(sock);
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+
+        // This one is beyond the budget -- the server should close it
+        // right away rather than holding it open for a handshake.
+        let mut excess = connect_with_retry(&control_addr, Duration::from_secs(5)).await;
+        let mut buf = [0u8; 1];
+        let read_result = tokio::time::timeout(Duration::from_millis(1500), excess.read(&mut buf)).await;
+        match read_result {
+            Ok(Ok(0)) => {} // EOF: server closed it immediately, as expected
+            Ok(Ok(n)) => panic!("expected the rejected connection to be closed, got {n} unexpected byte(s)"),
+            Ok(Err(e)) => panic!("unexpected read error on the rejected connection: {e}"),
+            Err(_) => panic!("the (budget+1)th connection was not closed within 1.5s -- rate limit doesn't appear to be enforced on the real listener"),
+        }
+
+        drop(budget_conns);
     }
 }
