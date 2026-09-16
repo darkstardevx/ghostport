@@ -1,0 +1,25 @@
+[package]
+name = "ghostport-firewall"
+version = "0.1.0"
+edition = "2021"
+description = "GhostPort's third plugin -- watches a running server-role daemon's journal for rejected/failed handshake attempts and actively blackholes the offending IP via nftables. A separate sidecar process, same shape as ghostport-metrics; never linked into the ghostport binary."
+license = "MIT"
+
+[[bin]]
+name = "ghostport-firewall"
+path = "src/main.rs"
+
+[dependencies]
+# Only for config::Config::load -- used to confirm the target daemon
+# is actually server-role (a client never accepts inbound connections,
+# so there is nothing here for this tool to protect on a client
+# machine). No runtime crypto/IPC interaction with ghostport-core at
+# all -- a third, different kind of plugin consumption after
+# ghostport-udp's "active peer" and ghostport-metrics's "passive
+# observer of the status socket".
+ghostport-core = { path = "../ghostport-core" }
+tokio = { version = "1.38", features = ["full"] }
+clap = { version = "4.5", features = ["derive"] }
+serde = { version = "1.0", features = ["derive"] }
+toml = "0.8"
+regex = "1"

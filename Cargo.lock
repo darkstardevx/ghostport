@@ -744,6 +744,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "ghostport-firewall"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "ghostport-core",
+ "regex",
+ "serde",
+ "tokio",
+ "toml",
+]
+
+[[package]]
 name = "ghostport-metrics"
 version = "0.1.0"
 dependencies = [

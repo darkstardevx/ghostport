@@ -1,0 +1,48 @@
+[Unit]
+Description=ghostport-firewall — watches ghostport's journal and blackholes offending IPs via nftables
+Documentation=https://github.com/darkstardevx/ghostport
+After=network-online.target ghostport.service
+Wants=network-online.target
+BindsTo=ghostport.service
+
+[Service]
+Type=simple
+User=raven
+Group=raven
+# Read access to the system journal (journalctl -u ghostport) without
+# running as root -- the default ACL on /var/log/journal grants this
+# to the systemd-journal group.
+SupplementaryGroups=systemd-journal
+WorkingDirectory=/home/raven/tools/daemons/ghostport
+ExecStart=/home/raven/.cargo-target/release/ghostport-firewall --config /home/raven/.config/ghostport-firewall/config.toml
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=10
+
+# Sandboxing. Real runtime footprint: reads its own optional
+# config.toml (covered by ProtectHome=read-only), reads the system
+# journal (systemd-journal group above), and shells out to `nft`
+# (needs CAP_NET_ADMIN) and `journalctl` (no special capability).
+# Writes nothing to disk at all -- bans live in the kernel via nft,
+# not in any file this unit owns -- so unlike ghostport.service itself
+# there is no ReadWritePaths grant needed here.
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=true
+CapabilityBoundingSet=CAP_NET_ADMIN
+AmbientCapabilities=CAP_NET_ADMIN
+# AF_NETLINK is load-bearing: `nft`'s own netlink socket calls run
+# under this unit's seccomp filter (inherited across execve), not just
+# ghostport-firewall's own -- excluding it would silently break every
+# nft invocation this whole tool exists to make.
+RestrictAddressFamilies=AF_UNIX AF_NETLINK
+MemoryDenyWriteExecute=true
+LockPersonality=true
+RestrictRealtime=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+
+[Install]
+WantedBy=multi-user.target
