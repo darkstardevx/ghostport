@@ -8,7 +8,9 @@ use app::{Mode, ServiceAction, Tab};
 
 use crossterm::event::{self, Event, KeyCode};
 use crossterm::execute;
-use crossterm::terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen};
+use crossterm::terminal::{
+    disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
+};
 use ratatui::backend::CrosstermBackend;
 use ratatui::Terminal;
 use std::io::{self, Write};
@@ -71,7 +73,11 @@ fn refresh_service_info(app: &mut App) {
     app.enabled_state = query_systemctl_field("is-enabled");
 }
 
-fn run_event_loop(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, app: &mut App, runtime: &tokio::runtime::Runtime) -> io::Result<()> {
+fn run_event_loop(
+    terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
+    app: &mut App,
+    runtime: &tokio::runtime::Runtime,
+) -> io::Result<()> {
     loop {
         terminal.draw(|frame| ui::draw(frame, app))?;
 
@@ -89,7 +95,9 @@ fn run_event_loop(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, app: &m
             // for. Cheap and infrequent enough that a blocking query
             // here doesn't hurt responsiveness.
             match app.tab {
-                app::Tab::Status => app.apply_status(runtime.block_on(crate::ipc::query_status(&app.socket_path))),
+                app::Tab::Status => {
+                    app.apply_status(runtime.block_on(crate::ipc::query_status(&app.socket_path)))
+                }
                 app::Tab::Service => refresh_service_info(app),
                 app::Tab::Links => {}
             }
@@ -104,18 +112,28 @@ fn run_event_loop(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, app: &m
     }
 }
 
-fn handle_key(app: &mut App, code: KeyCode, terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, runtime: &tokio::runtime::Runtime) -> io::Result<()> {
+fn handle_key(
+    app: &mut App,
+    code: KeyCode,
+    terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
+    runtime: &tokio::runtime::Runtime,
+) -> io::Result<()> {
     match app.mode {
         Mode::Normal => handle_normal(app, code, terminal, runtime),
         Mode::ChooseTemplate => handle_choose_template(app, code),
         Mode::AddLinkId | Mode::AddLinkAddress => handle_link_text_input(app, code),
-        Mode::AddLinkMode => handle_link_mode_choice(app, code),
+        Mode::AddLinkDirection => handle_link_mode_choice(app, code),
         Mode::ConfirmRemoveLink => handle_confirm_remove_link(app, code),
         Mode::ConfirmServiceAction => handle_confirm_service_action(app, code, terminal, runtime),
     }
 }
 
-fn handle_normal(app: &mut App, code: KeyCode, terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, runtime: &tokio::runtime::Runtime) -> io::Result<()> {
+fn handle_normal(
+    app: &mut App,
+    code: KeyCode,
+    terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
+    runtime: &tokio::runtime::Runtime,
+) -> io::Result<()> {
     match code {
         KeyCode::Char('q') | KeyCode::Esc => app.should_quit = true,
         KeyCode::Tab => app.next_tab(),
@@ -194,8 +212,12 @@ fn handle_link_text_input(app: &mut App, code: KeyCode) -> io::Result<()> {
 fn handle_link_mode_choice(app: &mut App, code: KeyCode) -> io::Result<()> {
     match code {
         KeyCode::Esc => app.cancel_link_wizard(),
-        KeyCode::Char('f') | KeyCode::Char('F') => app.choose_link_mode(crate::config::LinkMode::Forward),
-        KeyCode::Char('r') | KeyCode::Char('R') => app.choose_link_mode(crate::config::LinkMode::Reverse),
+        KeyCode::Char('f') | KeyCode::Char('F') => {
+            app.choose_link_mode(crate::config::LinkMode::Forward)
+        }
+        KeyCode::Char('r') | KeyCode::Char('R') => {
+            app.choose_link_mode(crate::config::LinkMode::Reverse)
+        }
         _ => {}
     }
     Ok(())
@@ -209,7 +231,12 @@ fn handle_confirm_remove_link(app: &mut App, code: KeyCode) -> io::Result<()> {
     Ok(())
 }
 
-fn handle_confirm_service_action(app: &mut App, code: KeyCode, terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, runtime: &tokio::runtime::Runtime) -> io::Result<()> {
+fn handle_confirm_service_action(
+    app: &mut App,
+    code: KeyCode,
+    terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
+    runtime: &tokio::runtime::Runtime,
+) -> io::Result<()> {
     match code {
         KeyCode::Char('y') | KeyCode::Char('Y') => {
             app.mode = Mode::Normal;
@@ -220,8 +247,14 @@ fn handle_confirm_service_action(app: &mut App, code: KeyCode, terminal: &mut Te
     Ok(())
 }
 
-fn run_pending_service_action(app: &mut App, terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, runtime: &tokio::runtime::Runtime) {
-    let Some(action) = app.pending_service_action.take() else { return };
+fn run_pending_service_action(
+    app: &mut App,
+    terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
+    runtime: &tokio::runtime::Runtime,
+) {
+    let Some(action) = app.pending_service_action.take() else {
+        return;
+    };
     let _ = run_service_action_suspended(terminal, action);
     refresh_service_info(app);
     app.apply_status(runtime.block_on(crate::ipc::query_status(&app.socket_path)));
@@ -233,16 +266,26 @@ fn run_pending_service_action(app: &mut App, terminal: &mut Terminal<CrosstermBa
 /// `--admin`), waits for it, then restores the TUI. Same "suspend for an
 /// interactive subprocess" pattern cyberfleet uses for `git fetch` (an
 /// SSH passphrase prompt hangs otherwise).
-fn run_service_action_suspended(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, action: ServiceAction) -> io::Result<()> {
+fn run_service_action_suspended(
+    terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
+    action: ServiceAction,
+) -> io::Result<()> {
     disable_raw_mode()?;
     execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
 
     match action {
-        ServiceAction::Start | ServiceAction::Stop | ServiceAction::Restart | ServiceAction::Enable | ServiceAction::Disable => {
+        ServiceAction::Start
+        | ServiceAction::Stop
+        | ServiceAction::Restart
+        | ServiceAction::Enable
+        | ServiceAction::Disable => {
             let verb = action.systemctl_verb();
             println!("[ghostport] running: sudo systemctl {verb} {SERVICE_NAME}");
             io::stdout().flush()?;
-            match std::process::Command::new("sudo").args(["systemctl", verb, SERVICE_NAME]).status() {
+            match std::process::Command::new("sudo")
+                .args(["systemctl", verb, SERVICE_NAME])
+                .status()
+            {
                 Ok(s) if s.success() => println!("[ghostport] {verb} succeeded"),
                 Ok(s) => println!("[ghostport] {verb} exited with {s}"),
                 Err(e) => println!("[ghostport] failed to run systemctl: {e}"),
@@ -256,7 +299,10 @@ fn run_service_action_suspended(terminal: &mut Terminal<CrosstermBackend<io::Std
             // privilege" reasoning as `systemctl is-active`. If the local
             // journal ACL denies it, the error prints directly; that's
             // more honest than silently retrying with sudo.
-            match std::process::Command::new("journalctl").args(["-u", SERVICE_NAME, "-n", "50", "--no-pager"]).status() {
+            match std::process::Command::new("journalctl")
+                .args(["-u", SERVICE_NAME, "-n", "50", "--no-pager"])
+                .status()
+            {
                 Ok(_) => {}
                 Err(e) => println!("[ghostport] failed to run journalctl: {e}"),
             }
@@ -287,7 +333,10 @@ fn install_unit() -> io::Result<()> {
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::null()) // tee would otherwise echo the file back to our own stdout
         .spawn()?;
-    tee.stdin.take().expect("stdin was piped").write_all(UNIT_FILE.as_bytes())?;
+    tee.stdin
+        .take()
+        .expect("stdin was piped")
+        .write_all(UNIT_FILE.as_bytes())?;
     match tee.wait() {
         Ok(s) if s.success() => println!("[ghostport] unit file installed"),
         Ok(s) => {
@@ -302,7 +351,10 @@ fn install_unit() -> io::Result<()> {
 
     println!("[ghostport] running: sudo systemctl daemon-reload");
     io::stdout().flush()?;
-    match std::process::Command::new("sudo").args(["systemctl", "daemon-reload"]).status() {
+    match std::process::Command::new("sudo")
+        .args(["systemctl", "daemon-reload"])
+        .status()
+    {
         Ok(s) if s.success() => println!("[ghostport] daemon-reload succeeded"),
         Ok(s) => println!("[ghostport] daemon-reload exited with {s}"),
         Err(e) => println!("[ghostport] failed to run systemctl daemon-reload: {e}"),
@@ -314,7 +366,10 @@ fn install_unit() -> io::Result<()> {
 /// `--admin --status` not requiring privilege. `field` is `is-active` or
 /// `is-enabled`.
 fn query_systemctl_field(field: &str) -> Option<String> {
-    let output = std::process::Command::new("systemctl").args([field, SERVICE_NAME]).output().ok()?;
+    let output = std::process::Command::new("systemctl")
+        .args([field, SERVICE_NAME])
+        .output()
+        .ok()?;
     let state = String::from_utf8_lossy(&output.stdout).trim().to_string();
     if state.is_empty() {
         None

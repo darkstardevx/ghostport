@@ -37,8 +37,15 @@ pub enum ServiceAction {
     ViewLogs,
 }
 
-pub const SERVICE_MENU: &[ServiceAction] =
-    &[ServiceAction::Start, ServiceAction::Stop, ServiceAction::Restart, ServiceAction::Enable, ServiceAction::Disable, ServiceAction::InstallUnit, ServiceAction::ViewLogs];
+pub const SERVICE_MENU: &[ServiceAction] = &[
+    ServiceAction::Start,
+    ServiceAction::Stop,
+    ServiceAction::Restart,
+    ServiceAction::Enable,
+    ServiceAction::Disable,
+    ServiceAction::InstallUnit,
+    ServiceAction::ViewLogs,
+];
 
 impl ServiceAction {
     pub fn systemctl_verb(self) -> &'static str {
@@ -76,7 +83,7 @@ pub enum Mode {
     Normal,
     ChooseTemplate,
     AddLinkId,
-    AddLinkMode,
+    AddLinkDirection,
     AddLinkAddress,
     ConfirmRemoveLink,
     ConfirmServiceAction,
@@ -154,7 +161,8 @@ impl App {
         match result {
             Ok(snap) => {
                 if let Some(current) = self.status_snapshot.take() {
-                    self.previous_snapshot = Some((self.status_captured_at.unwrap_or(now), current));
+                    self.previous_snapshot =
+                        Some((self.status_captured_at.unwrap_or(now), current));
                 }
                 self.status_captured_at = Some(now);
                 self.status_snapshot = Some(snap);
@@ -181,7 +189,10 @@ impl App {
         }
         let prev_link = prev_snap.links.iter().find(|l| l.id == link_id)?;
         let cur_link = cur_snap.links.iter().find(|l| l.id == link_id)?;
-        let fwd = cur_link.bytes_forward.saturating_sub(prev_link.bytes_forward) as f64 / elapsed;
+        let fwd = cur_link
+            .bytes_forward
+            .saturating_sub(prev_link.bytes_forward) as f64
+            / elapsed;
         let back = cur_link.bytes_back.saturating_sub(prev_link.bytes_back) as f64 / elapsed;
         Some((fwd, back))
     }
@@ -225,7 +236,9 @@ impl App {
     /// original entry gets replaced (or removed, if the id changed)
     /// rather than a duplicate being created.
     pub fn begin_edit_link(&mut self) {
-        let Some(link) = self.selected_link().cloned() else { return };
+        let Some(link) = self.selected_link().cloned() else {
+            return;
+        };
         self.editing_original_id = Some(link.id.clone());
         self.pending_link_id = None;
         self.pending_link_mode = None;
@@ -268,11 +281,11 @@ impl App {
             self.mode = Mode::AddLinkAddress;
         } else {
             self.input_buffer.clear();
-            self.mode = Mode::AddLinkMode;
+            self.mode = Mode::AddLinkDirection;
         }
     }
 
-    /// Called on 'f'/'r' while in `AddLinkMode` — a single keypress
+    /// Called on 'f'/'r' while in `AddLinkDirection` — a single keypress
     /// picks the mode directly rather than needing a typed value for a
     /// two-option enum.
     pub fn choose_link_mode(&mut self, mode: LinkMode) {
@@ -286,7 +299,8 @@ impl App {
     /// the UI can label the prompt correctly ("listen address:" vs
     /// "target address:").
     pub fn pending_link_needs_listen(&self) -> Option<bool> {
-        self.pending_link_mode.map(|m| self.config.link_needs_listen(m))
+        self.pending_link_mode
+            .map(|m| self.config.link_needs_listen(m))
     }
 
     pub fn is_editing(&self) -> bool {
@@ -307,7 +321,8 @@ impl App {
     }
 
     pub fn confirm_link_address(&mut self) {
-        let (Some(id), Some(mode)) = (self.pending_link_id.take(), self.pending_link_mode.take()) else {
+        let (Some(id), Some(mode)) = (self.pending_link_id.take(), self.pending_link_mode.take())
+        else {
             self.mode = Mode::Normal;
             return;
         };
@@ -326,7 +341,9 @@ impl App {
             // restart the whole add/edit from the id step.
             self.pending_link_id = Some(id);
             self.pending_link_mode = Some(mode);
-            self.message = Some(format!("\"{addr}\" isn't a valid host:port (e.g. 127.0.0.1:5432) — fix it and press enter"));
+            self.message = Some(format!(
+                "\"{addr}\" isn't a valid host:port (e.g. 127.0.0.1:5432) — fix it and press enter"
+            ));
             return;
         }
         self.input_buffer.clear();
@@ -334,9 +351,19 @@ impl App {
 
         let needs_listen = self.config.link_needs_listen(mode);
         let link = if needs_listen {
-            LinkConfig { id: id.clone(), mode, listen: Some(addr), target: None }
+            LinkConfig {
+                id: id.clone(),
+                mode,
+                listen: Some(addr),
+                target: None,
+            }
         } else {
-            LinkConfig { id: id.clone(), mode, listen: None, target: Some(addr) }
+            LinkConfig {
+                id: id.clone(),
+                mode,
+                listen: None,
+                target: Some(addr),
+            }
         };
 
         let was_editing = self.editing_original_id.is_some();
@@ -348,7 +375,12 @@ impl App {
         self.config.links.retain(|l| l.id != id); // replace if this id already existed
         self.config.links.push(link);
         self.dirty = true;
-        self.links_selected = self.config.links.iter().position(|l| l.id == id).unwrap_or(0);
+        self.links_selected = self
+            .config
+            .links
+            .iter()
+            .position(|l| l.id == id)
+            .unwrap_or(0);
         self.pending_default_address = None;
         let verb = if was_editing { "updated" } else { "added" };
         self.message = Some(format!("{verb} \"{id}\" (unsaved — press s to write, or the daemon won't see it until restart)"));
@@ -368,7 +400,10 @@ impl App {
             let removed = self.config.links.remove(self.links_selected);
             self.links_selected = self.links_selected.saturating_sub(1);
             self.dirty = true;
-            self.message = Some(format!("removed \"{}\" (unsaved — press s to write)", removed.id));
+            self.message = Some(format!(
+                "removed \"{}\" (unsaved — press s to write)",
+                removed.id
+            ));
         }
         self.mode = Mode::Normal;
     }
@@ -380,7 +415,11 @@ impl App {
                 self.message = Some(format!("saved {}", self.config_path.display()));
             }
             Err(errors) => {
-                self.message = Some(format!("refused to save — {} problem(s): {}", errors.len(), errors.join("; ")));
+                self.message = Some(format!(
+                    "refused to save — {} problem(s): {}",
+                    errors.len(),
+                    errors.join("; ")
+                ));
             }
         }
     }
@@ -389,7 +428,8 @@ impl App {
 
     pub fn move_service_selection(&mut self, delta: isize) {
         let len = SERVICE_MENU.len() as isize;
-        self.service_menu_selected = (self.service_menu_selected as isize + delta).rem_euclid(len) as usize;
+        self.service_menu_selected =
+            (self.service_menu_selected as isize + delta).rem_euclid(len) as usize;
     }
 
     pub fn selected_service_action(&self) -> ServiceAction {
@@ -421,14 +461,19 @@ mod tests {
     use crate::config::Role;
 
     fn scratch_config_path(name: &str) -> PathBuf {
-        std::env::temp_dir().join(format!("ghostport-tui-app-test-{name}-{}.toml", std::process::id()))
+        std::env::temp_dir().join(format!(
+            "ghostport-tui-app-test-{name}-{}.toml",
+            std::process::id()
+        ))
     }
 
     fn write_sample_config(path: &PathBuf) {
         let cfg = Config {
             role: Role::Client,
             private_key_path: PathBuf::from("/tmp/identity.key"),
-            peer_public_key: Some(crate::keys::encode_public_key(&crate::keys::generate().public)),
+            peer_public_key: Some(crate::keys::encode_public_key(
+                &crate::keys::generate().public,
+            )),
             peers: vec![],
             listen_control: None,
             listen_data: None,
@@ -453,7 +498,7 @@ mod tests {
 
         app.input_buffer = "db".to_string();
         app.confirm_link_id();
-        assert_eq!(app.mode, Mode::AddLinkMode);
+        assert_eq!(app.mode, Mode::AddLinkDirection);
 
         app.choose_link_mode(LinkMode::Forward); // client + forward -> needs `listen`
         assert_eq!(app.mode, Mode::AddLinkAddress);
@@ -500,7 +545,12 @@ mod tests {
         write_sample_config(&path);
         let mut app = App::new(path.clone(), PathBuf::from("/tmp/nonexistent.sock")).unwrap();
 
-        app.config.links.push(LinkConfig { id: "db".to_string(), mode: LinkMode::Reverse, listen: None, target: Some("old".to_string()) });
+        app.config.links.push(LinkConfig {
+            id: "db".to_string(),
+            mode: LinkMode::Reverse,
+            listen: None,
+            target: Some("old".to_string()),
+        });
 
         app.begin_add_link();
         app.template_selected = templates::custom_index();
@@ -512,7 +562,10 @@ mod tests {
         app.confirm_link_address();
 
         assert_eq!(app.config.links.iter().filter(|l| l.id == "db").count(), 1);
-        assert_eq!(app.config.links.iter().find(|l| l.id == "db").unwrap().mode, LinkMode::Forward);
+        assert_eq!(
+            app.config.links.iter().find(|l| l.id == "db").unwrap().mode,
+            LinkMode::Forward
+        );
         std::fs::remove_file(&path).ok();
     }
 
@@ -521,7 +574,12 @@ mod tests {
         let path = scratch_config_path("edit");
         write_sample_config(&path);
         let mut app = App::new(path.clone(), PathBuf::from("/tmp/nonexistent.sock")).unwrap();
-        app.config.links.push(LinkConfig { id: "db".to_string(), mode: LinkMode::Forward, listen: Some("127.0.0.1:5432".to_string()), target: None });
+        app.config.links.push(LinkConfig {
+            id: "db".to_string(),
+            mode: LinkMode::Forward,
+            listen: Some("127.0.0.1:5432".to_string()),
+            target: None,
+        });
         app.links_selected = 0;
 
         app.begin_edit_link();
@@ -530,7 +588,7 @@ mod tests {
         assert!(app.is_editing());
 
         app.confirm_link_id(); // id unchanged, mode not yet re-chosen -> normal mode step
-        assert_eq!(app.mode, Mode::AddLinkMode);
+        assert_eq!(app.mode, Mode::AddLinkDirection);
 
         app.choose_link_mode(LinkMode::Forward);
         assert_eq!(app.input_buffer, "127.0.0.1:5432"); // prefilled with the CURRENT address
@@ -538,9 +596,20 @@ mod tests {
         app.input_buffer = "127.0.0.1:2222".to_string(); // actually change it
         app.confirm_link_address();
 
-        assert_eq!(app.config.links.len(), 1, "must update in place, not create a second entry");
-        assert_eq!(app.config.links[0].listen.as_deref(), Some("127.0.0.1:2222"));
-        assert!(app.message.as_deref().unwrap_or_default().contains("updated"));
+        assert_eq!(
+            app.config.links.len(),
+            1,
+            "must update in place, not create a second entry"
+        );
+        assert_eq!(
+            app.config.links[0].listen.as_deref(),
+            Some("127.0.0.1:2222")
+        );
+        assert!(app
+            .message
+            .as_deref()
+            .unwrap_or_default()
+            .contains("updated"));
         std::fs::remove_file(&path).ok();
     }
 
@@ -549,7 +618,12 @@ mod tests {
         let path = scratch_config_path("edit-rename");
         write_sample_config(&path);
         let mut app = App::new(path.clone(), PathBuf::from("/tmp/nonexistent.sock")).unwrap();
-        app.config.links.push(LinkConfig { id: "old-name".to_string(), mode: LinkMode::Forward, listen: Some("127.0.0.1:1".to_string()), target: None });
+        app.config.links.push(LinkConfig {
+            id: "old-name".to_string(),
+            mode: LinkMode::Forward,
+            listen: Some("127.0.0.1:1".to_string()),
+            target: None,
+        });
         app.links_selected = 0;
 
         app.begin_edit_link();
@@ -596,8 +670,18 @@ mod tests {
         let path = scratch_config_path("remove");
         write_sample_config(&path);
         let mut app = App::new(path.clone(), PathBuf::from("/tmp/nonexistent.sock")).unwrap();
-        app.config.links.push(LinkConfig { id: "a".to_string(), mode: LinkMode::Forward, listen: Some("x".to_string()), target: None });
-        app.config.links.push(LinkConfig { id: "b".to_string(), mode: LinkMode::Forward, listen: Some("y".to_string()), target: None });
+        app.config.links.push(LinkConfig {
+            id: "a".to_string(),
+            mode: LinkMode::Forward,
+            listen: Some("x".to_string()),
+            target: None,
+        });
+        app.config.links.push(LinkConfig {
+            id: "b".to_string(),
+            mode: LinkMode::Forward,
+            listen: Some("y".to_string()),
+            target: None,
+        });
         app.links_selected = 0;
 
         app.remove_selected_link();
@@ -645,7 +729,11 @@ mod tests {
         // Stays in AddLinkAddress (not bounced back to Normal) so the
         // user can just fix the typo and press enter again.
         assert_eq!(app.mode, Mode::AddLinkAddress);
-        assert!(app.message.as_deref().unwrap_or_default().contains("isn't a valid host:port"));
+        assert!(app
+            .message
+            .as_deref()
+            .unwrap_or_default()
+            .contains("isn't a valid host:port"));
         assert!(app.config.links.is_empty());
 
         // Fixing it and confirming again should now succeed.
@@ -698,11 +786,18 @@ mod tests {
         write_sample_config(&path);
         let mut app = App::new(path.clone(), PathBuf::from("/tmp/nonexistent.sock")).unwrap();
 
-        let logs_index = SERVICE_MENU.iter().position(|a| *a == ServiceAction::ViewLogs).unwrap();
+        let logs_index = SERVICE_MENU
+            .iter()
+            .position(|a| *a == ServiceAction::ViewLogs)
+            .unwrap();
         app.service_menu_selected = logs_index;
         app.activate_selected_service_action();
 
-        assert_eq!(app.mode, Mode::Normal, "view-logs shouldn't need a y/n confirm");
+        assert_eq!(
+            app.mode,
+            Mode::Normal,
+            "view-logs shouldn't need a y/n confirm"
+        );
         assert_eq!(app.pending_service_action, Some(ServiceAction::ViewLogs));
         std::fs::remove_file(&path).ok();
     }
@@ -713,7 +808,10 @@ mod tests {
         write_sample_config(&path);
         let mut app = App::new(path.clone(), PathBuf::from("/tmp/nonexistent.sock")).unwrap();
 
-        app.service_menu_selected = SERVICE_MENU.iter().position(|a| *a == ServiceAction::Start).unwrap();
+        app.service_menu_selected = SERVICE_MENU
+            .iter()
+            .position(|a| *a == ServiceAction::Start)
+            .unwrap();
         app.activate_selected_service_action();
 
         assert_eq!(app.mode, Mode::ConfirmServiceAction);
