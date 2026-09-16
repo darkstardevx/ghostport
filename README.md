@@ -279,6 +279,11 @@ src/main.rs      CLI (keygen/check/run/status/tui) + integration tests
 - No live config reload — editing links in the TUI always needs a
   restart (Service tab) to take effect.
 
+See [SECURITY.md](SECURITY.md) for the full threat model — what's
+actually defended (MITM, eavesdropping, connection-flood DoS) versus
+what isn't (key compromise, multiple peers, the host itself) — and how
+to report a vulnerability.
+
 ## 📄 License
 
 MIT
