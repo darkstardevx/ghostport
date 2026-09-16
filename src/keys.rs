@@ -10,6 +10,7 @@
 //! carries no such requirement; it's meant to be shared with the peer.
 
 use crate::noise::PATTERN;
+use sha2::{Digest, Sha256};
 use std::io::Write as _;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
@@ -74,6 +75,20 @@ pub fn decode_public_key(s: &str) -> Result<Vec<u8>, String> {
         return Err(format!("key must be 32 bytes, got {}", key.len()));
     }
     Ok(key)
+}
+
+/// A short, comparable fingerprint for a public key — SHA-256 of the
+/// raw key bytes, rendered as colon-grouped hex (the same idea as
+/// `ssh-keygen -l`). Meant to be read aloud or compared side-by-side
+/// with the peer over an out-of-band channel (voice call, chat), the
+/// same verification ritual as an SSH host key — the pinned key itself
+/// already makes the handshake cryptographically refuse an impostor,
+/// but a transcription error in the 44-character base64 key currently
+/// has no better diagnostic than an opaque "wrong key?" handshake
+/// failure. This gives both sides something concrete to actually check.
+pub fn fingerprint(public_key: &[u8]) -> String {
+    let digest = Sha256::digest(public_key);
+    digest.iter().map(|b| format!("{b:02x}")).collect::<Vec<_>>().join(":")
 }
 
 fn base64_encode(bytes: &[u8]) -> String {
@@ -150,5 +165,30 @@ mod tests {
     fn rejects_wrong_length_public_key() {
         let short = base64_encode(&[1, 2, 3]);
         assert!(decode_public_key(&short).is_err());
+    }
+
+    #[test]
+    fn fingerprint_is_deterministic() {
+        let kp = generate();
+        assert_eq!(fingerprint(&kp.public), fingerprint(&kp.public));
+    }
+
+    #[test]
+    fn fingerprint_differs_for_different_keys() {
+        let a = generate();
+        let b = generate();
+        assert_ne!(fingerprint(&a.public), fingerprint(&b.public));
+    }
+
+    #[test]
+    fn fingerprint_is_colon_grouped_hex_of_the_full_sha256_digest() {
+        let kp = generate();
+        let fp = fingerprint(&kp.public);
+        let groups: Vec<&str> = fp.split(':').collect();
+        assert_eq!(groups.len(), 32, "SHA-256 digest is 32 bytes, one hex pair per group");
+        for group in groups {
+            assert_eq!(group.len(), 2);
+            assert!(group.chars().all(|c| c.is_ascii_hexdigit()));
+        }
     }
 }

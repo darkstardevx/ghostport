@@ -111,6 +111,10 @@ fn run_keygen(out: &str) -> ExitCode {
     println!();
     println!("Give this public key to the peer, for their config's `peer_public_key`:");
     println!("  {}", theme::emphasis(&keys::encode_public_key(&kp.public)));
+    println!();
+    println!("Fingerprint (read this aloud / compare side-by-side with the peer");
+    println!("to catch a transcription error in the key above):");
+    println!("  {}", theme::accent(&keys::fingerprint(&kp.public)));
     ExitCode::SUCCESS
 }
 
@@ -125,6 +129,8 @@ fn run_check(config_path: &PathBuf) -> ExitCode {
     let errors = cfg.validate();
     if errors.is_empty() {
         println!("ghostport: {} is {} ({:?} role, {} link{})", config_path.display(), theme::ok("valid"), cfg.role, cfg.links.len(), if cfg.links.len() == 1 { "" } else { "s" });
+        println!();
+        print_fingerprints_for_check(&cfg);
         ExitCode::SUCCESS
     } else {
         eprintln!("ghostport: {} has {} {}:", config_path.display(), errors.len(), theme::err(if errors.len() == 1 { "problem" } else { "problems" }));
@@ -132,6 +138,26 @@ fn run_check(config_path: &PathBuf) -> ExitCode {
             eprintln!("  - {}", theme::warn(e));
         }
         ExitCode::FAILURE
+    }
+}
+
+/// Prints whatever key fingerprints are available for a valid config —
+/// same verification ritual as an SSH host key, read aloud or compared
+/// side-by-side with the peer over an out-of-band channel. Best-effort:
+/// a config can be structurally valid before `ghostport keygen` has
+/// ever been run for this identity, so a missing/unreadable local
+/// public key file just means that line is skipped, not a `check`
+/// failure.
+fn print_fingerprints_for_check(cfg: &Config) {
+    if let Ok(peer_key) = keys::decode_public_key(&cfg.peer_public_key) {
+        println!("  peer_public_key fingerprint: {}", theme::accent(&keys::fingerprint(&peer_key)));
+    }
+
+    let local_pub_path = keys::public_key_path(&cfg.private_key_path);
+    if let Ok(text) = std::fs::read_to_string(&local_pub_path) {
+        if let Ok(local_key) = keys::decode_public_key(text.trim()) {
+            println!("  local identity fingerprint:  {}", theme::accent(&keys::fingerprint(&local_key)));
+        }
     }
 }
 
