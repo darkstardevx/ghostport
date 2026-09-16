@@ -14,11 +14,17 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+/// Live per-link counters, updated on the hot path by [`crate::relay::relay`].
 #[derive(Default)]
 pub struct LinkStats {
+    /// Streams currently being relayed on this link.
     pub active_streams: AtomicU64,
+    /// Total streams ever opened on this link since the daemon started.
     pub total_streams: AtomicU64,
+    /// Bytes relayed client-to-target (or, for a reverse link,
+    /// initiator-to-target) since the daemon started.
     pub bytes_forward: AtomicU64,
+    /// Bytes relayed in the opposite direction of [`Self::bytes_forward`].
     pub bytes_back: AtomicU64,
 }
 
@@ -35,6 +41,8 @@ impl LinkStats {
     }
 }
 
+/// Live status of the single control connection (connected/not, since
+/// when, and which peer).
 #[derive(Default)]
 pub struct ControlStatus {
     connected: AtomicBool,
@@ -51,6 +59,9 @@ pub struct ControlStatus {
 }
 
 impl ControlStatus {
+    /// Records a fresh control connection: marks connected, timestamps
+    /// it, and remembers the peer's address and (server-role only)
+    /// matched name.
     pub fn set_connected(&self, peer_addr: String, peer_name: Option<String>) {
         self.connected.store(true, Ordering::Relaxed);
         *self.connected_since.lock().expect("not poisoned") = Some(now_unix());
@@ -58,6 +69,10 @@ impl ControlStatus {
         *self.peer_name.lock().expect("not poisoned") = peer_name;
     }
 
+    /// Marks the control connection as no longer connected. Leaves the
+    /// last-known peer address/name in place (only `connected` and
+    /// `connected_since`-reporting change) so status output can still
+    /// say who it was.
     pub fn set_disconnected(&self) {
         self.connected.store(false, Ordering::Relaxed);
     }
@@ -70,14 +85,22 @@ fn now_unix() -> u64 {
         .unwrap_or(0)
 }
 
+/// All live runtime state for one daemon instance, shared via `Arc`
+/// across every task and queried by the status IPC socket.
 pub struct SharedState {
+    /// Which role this instance is running as.
     pub role: Role,
     started_at: u64,
+    /// Live control-connection status.
     pub control: ControlStatus,
+    /// Per-link counters, keyed by link ID. Built once at startup from
+    /// config and never mutated afterward — only the atomics inside
+    /// each [`LinkStats`] change, so reading this map needs no lock.
     pub links: HashMap<String, LinkStats>,
 }
 
 impl SharedState {
+    /// Builds fresh, zeroed state for every link in `config`.
     pub fn new(config: &Config) -> Self {
         let links = config
             .links
@@ -92,6 +115,10 @@ impl SharedState {
         }
     }
 
+    /// Takes a point-in-time, JSON-serializable snapshot of this state
+    /// for the status IPC socket / TUI to consume. `config` supplies
+    /// each link's mode (not stored in `LinkStats` itself) and the
+    /// authoritative link ordering.
     pub fn snapshot(&self, config: &Config) -> StatusSnapshot {
         let control_connected = self.control.connected.load(Ordering::Relaxed);
         StatusSnapshot {
@@ -120,24 +147,42 @@ impl SharedState {
     }
 }
 
+/// One link's counters at snapshot time — the JSON-serializable form
+/// of [`LinkStats`].
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct LinkSnapshot {
+    /// The link's configured ID.
     pub id: String,
+    /// `"forward"` or `"reverse"`, lowercased from [`crate::config::LinkMode`].
     pub mode: String,
+    /// Streams currently being relayed.
     pub active_streams: u64,
+    /// Total streams ever opened on this link.
     pub total_streams: u64,
+    /// Bytes relayed in the forward direction — see [`LinkStats::bytes_forward`].
     pub bytes_forward: u64,
+    /// Bytes relayed in the opposite direction.
     pub bytes_back: u64,
 }
 
+/// The full point-in-time daemon status, as served over the status IPC
+/// socket and consumed by `ghostport status`/the TUI.
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct StatusSnapshot {
+    /// `"server"` or `"client"`, lowercased from [`Role`].
     pub role: String,
+    /// Seconds since this daemon instance started.
     pub uptime_secs: u64,
+    /// Whether the control connection is currently up.
     pub control_connected: bool,
+    /// Seconds since the current control connection was established;
+    /// `None` when not connected.
     pub control_connected_since_secs_ago: Option<u64>,
+    /// The control peer's socket address, if ever connected.
     pub control_peer_addr: Option<String>,
+    /// The control peer's matched config name (server role only).
     pub control_peer_name: Option<String>,
+    /// Per-link snapshots, in config order.
     pub links: Vec<LinkSnapshot>,
 }
 

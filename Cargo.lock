@@ -715,13 +715,24 @@ dependencies = [
 name = "ghostport"
 version = "0.1.0"
 dependencies = [
- "base64",
  "clap",
  "crossterm",
  "cybercore",
+ "ghostport-core",
+ "ratatui",
+ "serde_json",
+ "tokio",
+ "toml",
+]
+
+[[package]]
+name = "ghostport-core"
+version = "0.1.0"
+dependencies = [
+ "base64",
+ "cybercore",
  "gateflow",
  "rand",
- "ratatui",
  "serde",
  "serde_json",
  "sha2",

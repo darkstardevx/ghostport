@@ -11,6 +11,8 @@ use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 /// allocation — control/hello messages are always tiny in practice.
 const MAX_MESSAGE_LEN: u32 = 64 * 1024;
 
+/// Serializes `msg` to JSON and writes it as a `u32`-LE length prefix
+/// followed by the bytes, flushing afterward.
 pub async fn send_json<T: Serialize>(
     stream: &mut (impl AsyncWrite + Unpin),
     msg: &T,
@@ -22,6 +24,9 @@ pub async fn send_json<T: Serialize>(
     stream.flush().await
 }
 
+/// Reads one [`send_json`]-framed message and deserializes it,
+/// rejecting an oversized length prefix (64 KiB) before allocating the
+/// buffer for it.
 pub async fn recv_json<T: DeserializeOwned>(
     stream: &mut (impl AsyncRead + Unpin),
 ) -> std::io::Result<T> {

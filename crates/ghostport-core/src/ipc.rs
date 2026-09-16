@@ -16,6 +16,8 @@ use std::sync::Arc;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{UnixListener, UnixStream};
 
+/// Where the status socket lives when no path is overridden:
+/// `$HOME/.local/state/ghostport/ghostport.sock`.
 pub fn default_socket_path() -> PathBuf {
     let home = std::env::var("HOME").unwrap_or_else(|_| "/".to_string());
     PathBuf::from(home).join(".local/state/ghostport/ghostport.sock")

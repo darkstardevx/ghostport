@@ -6,6 +6,8 @@
 //! "check the identity after the fact" step needed, the cryptography
 //! itself refuses an impostor.
 
+/// The exact Noise pattern GhostPort speaks — both sides must build
+/// against this same string or the handshake won't even start.
 pub const PATTERN: &str = "Noise_KK_25519_ChaChaPoly_BLAKE2s";
 
 fn builder<'a>(local_private: &'a [u8], remote_public: &'a [u8]) -> snow::Builder<'a> {
@@ -18,6 +20,8 @@ fn builder<'a>(local_private: &'a [u8], remote_public: &'a [u8]) -> snow::Builde
     .remote_public_key(remote_public)
 }
 
+/// Builds the handshake state for the side that opens the connection
+/// (the `client` role dialing out).
 pub fn initiator(
     local_private: &[u8],
     remote_public: &[u8],
@@ -27,6 +31,8 @@ pub fn initiator(
         .map_err(|e| format!("failed to build Noise initiator: {e}"))
 }
 
+/// Builds the handshake state for the side that accepts the connection
+/// (the `server` role).
 pub fn responder(
     local_private: &[u8],
     remote_public: &[u8],

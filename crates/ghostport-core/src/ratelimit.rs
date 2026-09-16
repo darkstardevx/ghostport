@@ -19,7 +19,11 @@ use std::time::{Duration, Instant};
 use tokio::sync::{Mutex, OwnedSemaphorePermit, Semaphore};
 
 const MAX_CONCURRENT_HANDSHAKES: usize = 64;
-pub(crate) const MAX_ATTEMPTS_PER_WINDOW: usize = 10;
+/// `pub` (not `pub(crate)`) so real integration tests under `tests/`
+/// — a separate crate from `ghostport-core`'s own `src/` — can exhaust
+/// exactly this many attempts to prove the limiter's real boundary,
+/// rather than guessing or duplicating the constant.
+pub const MAX_ATTEMPTS_PER_WINDOW: usize = 10;
 const WINDOW: Duration = Duration::from_secs(60);
 
 /// Per-IP attempt history isn't ever pruned for IPs that stop
@@ -35,6 +39,7 @@ pub struct HandshakeLimiter {
 }
 
 impl HandshakeLimiter {
+    /// Builds a fresh limiter with an empty per-IP history.
     pub fn new() -> Arc<Self> {
         Arc::new(Self {
             concurrent: Arc::new(Semaphore::new(MAX_CONCURRENT_HANDSHAKES)),

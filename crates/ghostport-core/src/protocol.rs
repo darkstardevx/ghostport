@@ -11,14 +11,19 @@ use serde::{Deserialize, Serialize};
 /// Sent on the persistent control connection.
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub enum ControlMessage {
+    /// Liveness probe; the receiving side replies with [`ControlMessage::Pong`].
     Ping,
+    /// Reply to [`ControlMessage::Ping`].
     Pong,
     /// Sent by the server when a `reverse`-mode link needs a stream: the
     /// client can't be dialed directly (assumed to be behind NAT), so
     /// this asks it to dial a fresh data-tunnel connection itself and
     /// identify it with `stream_id`.
     OpenStream {
+        /// Which configured link this stream is for.
         link_id: String,
+        /// Correlates the client's resulting data-tunnel connection
+        /// back to the specific accepted connection that triggered it.
         stream_id: u64,
     },
 }
@@ -32,6 +37,10 @@ pub enum ControlMessage {
 /// connection to pair it with.
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct StreamHello {
+    /// Which configured link this stream carries traffic for.
     pub link_id: String,
+    /// Set only when this stream is answering a
+    /// [`ControlMessage::OpenStream`] request, so the server can pair
+    /// it with the accepted connection that triggered it.
     pub stream_id: Option<u64>,
 }

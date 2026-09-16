@@ -15,11 +15,15 @@ use std::io::Write as _;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
+/// A generated static Noise X25519 keypair, in raw byte form.
 pub struct Keypair {
+    /// 32 raw private key bytes. Never log or print this.
     pub private: Vec<u8>,
+    /// 32 raw public key bytes — safe to share with the peer.
     pub public: Vec<u8>,
 }
 
+/// Generates a new random static Noise keypair.
 pub fn generate() -> Keypair {
     let kp = snow::Builder::new(
         PATTERN
@@ -42,6 +46,9 @@ pub fn public_key_path(private_key_path: &Path) -> PathBuf {
     PathBuf::from(s)
 }
 
+/// Writes `private` to `path` as a base64 line, creating the parent
+/// directory (mode `0700`) if needed and locking the file itself to
+/// `0600` afterward.
 pub fn save_private_key(path: &Path, private: &[u8]) -> std::io::Result<()> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
@@ -67,6 +74,8 @@ fn write_base64_line(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     file.write_all(b"\n")
 }
 
+/// Reads and base64-decodes the private key at `path`, validating it's
+/// a real 32-byte key.
 pub fn load_private_key(path: &Path) -> Result<Vec<u8>, String> {
     let text = std::fs::read_to_string(path)
         .map_err(|e| format!("failed to read {}: {e}", path.display()))?;
@@ -74,10 +83,15 @@ pub fn load_private_key(path: &Path) -> Result<Vec<u8>, String> {
         .map_err(|e| format!("{} does not contain a valid key: {e}", path.display()))
 }
 
+/// Base64-encodes a public key for display or writing to a config file
+/// (this is the string format `ghostport keygen` prints and
+/// `PeerConfig::public_key`/`Config::peer_public_key` expect).
 pub fn encode_public_key(public: &[u8]) -> String {
     base64_encode(public)
 }
 
+/// Decodes and validates a base64-encoded public key, rejecting
+/// anything that doesn't decode to exactly 32 bytes.
 pub fn decode_public_key(s: &str) -> Result<Vec<u8>, String> {
     let key = base64_decode(s.trim()).map_err(|e| format!("invalid base64 key: {e}"))?;
     if key.len() != 32 {

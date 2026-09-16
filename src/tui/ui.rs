@@ -4,7 +4,7 @@
 
 use super::app::{App, Mode, ServiceAction, Tab, SERVICE_MENU};
 use super::{format, templates};
-use crate::keys;
+use ghostport_core::keys;
 use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
@@ -214,7 +214,7 @@ fn draw_template_menu(frame: &mut Frame, theme: &Theme, app: &App, area: Rect) {
     let mut items: Vec<ListItem> = templates::TEMPLATES
         .iter()
         .map(|t| {
-            let mode_color = theme.mode_color(t.mode == crate::config::LinkMode::Forward);
+            let mode_color = theme.mode_color(t.mode == ghostport_core::config::LinkMode::Forward);
             ListItem::new(Line::from(vec![
                 Span::styled(format!("{:<28}", t.name), Style::default().fg(theme.white)),
                 Span::styled(
@@ -346,7 +346,7 @@ fn draw_peer_links_checklist(frame: &mut Frame, theme: &Theme, app: &App, area: 
         .map(|l| {
             let checked = app.peer_link_is_checked(&l.id);
             let checkbox = if checked { "[x] " } else { "[ ] " };
-            let mode_color = theme.mode_color(l.mode == crate::config::LinkMode::Forward);
+            let mode_color = theme.mode_color(l.mode == ghostport_core::config::LinkMode::Forward);
             ListItem::new(Line::from(vec![
                 Span::styled(
                     checkbox,
@@ -558,7 +558,7 @@ fn draw_links(frame: &mut Frame, theme: &Theme, app: &App, area: Rect) {
         .enumerate()
         .map(|(i, l)| {
             let selected = i == app.links_selected;
-            let mode_color = theme.mode_color(l.mode == crate::config::LinkMode::Forward);
+            let mode_color = theme.mode_color(l.mode == ghostport_core::config::LinkMode::Forward);
             let id_style = if selected {
                 Style::default()
                     .fg(theme.acid_green)
@@ -634,7 +634,7 @@ fn draw_peers(frame: &mut Frame, theme: &Theme, app: &App, area: Rect) {
         .border_style(Style::default().fg(theme.line))
         .title(Span::styled(title, title_style));
 
-    if app.config.role != crate::config::Role::Server {
+    if app.config.role != ghostport_core::config::Role::Server {
         let lines = vec![
             Line::from(Span::styled(
                 "peers are a server-role feature",

@@ -36,7 +36,7 @@ pub fn run(config_path: PathBuf, socket_path: PathBuf) -> ExitCode {
     };
     let runtime = tokio::runtime::Runtime::new().expect("failed to start tokio runtime");
     refresh_service_info(&mut app);
-    app.apply_status(runtime.block_on(crate::ipc::query_status(&app.socket_path)));
+    app.apply_status(runtime.block_on(ghostport_core::ipc::query_status(&app.socket_path)));
 
     let setup = (|| -> io::Result<Terminal<CrosstermBackend<io::Stdout>>> {
         enable_raw_mode()?;
@@ -95,9 +95,9 @@ fn run_event_loop(
             // for. Cheap and infrequent enough that a blocking query
             // here doesn't hurt responsiveness.
             match app.tab {
-                app::Tab::Status => {
-                    app.apply_status(runtime.block_on(crate::ipc::query_status(&app.socket_path)))
-                }
+                app::Tab::Status => app.apply_status(
+                    runtime.block_on(ghostport_core::ipc::query_status(&app.socket_path)),
+                ),
                 app::Tab::Service => refresh_service_info(app),
                 app::Tab::Links | app::Tab::Peers => {}
             }
@@ -177,7 +177,9 @@ fn handle_normal(
             },
             Tab::Status => {
                 if code == KeyCode::Char('r') {
-                    app.apply_status(runtime.block_on(crate::ipc::query_status(&app.socket_path)));
+                    app.apply_status(
+                        runtime.block_on(ghostport_core::ipc::query_status(&app.socket_path)),
+                    );
                 }
             }
             Tab::Peers => match code {
@@ -234,10 +236,10 @@ fn handle_link_mode_choice(app: &mut App, code: KeyCode) -> io::Result<()> {
     match code {
         KeyCode::Esc => app.cancel_link_wizard(),
         KeyCode::Char('f') | KeyCode::Char('F') => {
-            app.choose_link_mode(crate::config::LinkMode::Forward)
+            app.choose_link_mode(ghostport_core::config::LinkMode::Forward)
         }
         KeyCode::Char('r') | KeyCode::Char('R') => {
-            app.choose_link_mode(crate::config::LinkMode::Reverse)
+            app.choose_link_mode(ghostport_core::config::LinkMode::Reverse)
         }
         _ => {}
     }
@@ -315,7 +317,7 @@ fn run_pending_service_action(
     };
     let _ = run_service_action_suspended(terminal, action);
     refresh_service_info(app);
-    app.apply_status(runtime.block_on(crate::ipc::query_status(&app.socket_path)));
+    app.apply_status(runtime.block_on(ghostport_core::ipc::query_status(&app.socket_path)));
 }
 
 /// Leaves the alternate screen / raw mode, runs the action inheriting

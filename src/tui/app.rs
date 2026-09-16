@@ -13,10 +13,10 @@
 //! why the Service tab lives next to the Links tab: the natural
 //! workflow is edit -> save -> restart.
 
-use crate::config::{Config, LinkConfig, LinkMode, PeerConfig, Role};
-use crate::keys;
-use crate::stats::StatusSnapshot;
 use crate::tui::templates;
+use ghostport_core::config::{Config, LinkConfig, LinkMode, PeerConfig, Role};
+use ghostport_core::keys;
+use ghostport_core::stats::StatusSnapshot;
 use std::path::PathBuf;
 use std::time::Instant;
 
@@ -701,7 +701,7 @@ impl App {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::Role;
+    use ghostport_core::config::Role;
 
     fn scratch_config_path(name: &str) -> PathBuf {
         std::env::temp_dir().join(format!(
@@ -714,8 +714,8 @@ mod tests {
         let cfg = Config {
             role: Role::Client,
             private_key_path: PathBuf::from("/tmp/identity.key"),
-            peer_public_key: Some(crate::keys::encode_public_key(
-                &crate::keys::generate().public,
+            peer_public_key: Some(ghostport_core::keys::encode_public_key(
+                &ghostport_core::keys::generate().public,
             )),
             peers: vec![],
             listen_control: None,
@@ -1107,7 +1107,8 @@ mod tests {
         let path = scratch_config_path("add-peer");
         write_sample_server_config(&path);
         let mut app = App::new(path.clone(), PathBuf::from("/tmp/nonexistent.sock")).unwrap();
-        let peer_key_b64 = crate::keys::encode_public_key(&crate::keys::generate().public);
+        let peer_key_b64 =
+            ghostport_core::keys::encode_public_key(&ghostport_core::keys::generate().public);
 
         app.begin_add_peer();
         assert_eq!(app.mode, Mode::AddPeerName);
@@ -1135,7 +1136,8 @@ mod tests {
         let path = scratch_config_path("peer-toggle");
         write_sample_server_config(&path);
         let mut app = App::new(path.clone(), PathBuf::from("/tmp/nonexistent.sock")).unwrap();
-        let peer_key_b64 = crate::keys::encode_public_key(&crate::keys::generate().public);
+        let peer_key_b64 =
+            ghostport_core::keys::encode_public_key(&ghostport_core::keys::generate().public);
 
         app.begin_add_peer();
         app.input_buffer = "bob".to_string();
@@ -1165,14 +1167,16 @@ mod tests {
         let path = scratch_config_path("peer-replace");
         write_sample_server_config(&path);
         let mut app = App::new(path.clone(), PathBuf::from("/tmp/nonexistent.sock")).unwrap();
-        let old_key = crate::keys::encode_public_key(&crate::keys::generate().public);
+        let old_key =
+            ghostport_core::keys::encode_public_key(&ghostport_core::keys::generate().public);
         app.config.peers.push(PeerConfig {
             name: "alice".to_string(),
             public_key: old_key,
             links: vec![],
         });
 
-        let new_key = crate::keys::encode_public_key(&crate::keys::generate().public);
+        let new_key =
+            ghostport_core::keys::encode_public_key(&ghostport_core::keys::generate().public);
         app.begin_add_peer();
         app.input_buffer = "alice".to_string();
         app.confirm_peer_name();
@@ -1206,7 +1210,7 @@ mod tests {
         let path = scratch_config_path("peer-edit");
         write_sample_server_config(&path);
         let mut app = App::new(path.clone(), PathBuf::from("/tmp/nonexistent.sock")).unwrap();
-        let key = crate::keys::encode_public_key(&crate::keys::generate().public);
+        let key = ghostport_core::keys::encode_public_key(&ghostport_core::keys::generate().public);
         app.config.peers.push(PeerConfig {
             name: "alice".to_string(),
             public_key: key.clone(),
@@ -1251,7 +1255,7 @@ mod tests {
         let path = scratch_config_path("peer-rename");
         write_sample_server_config(&path);
         let mut app = App::new(path.clone(), PathBuf::from("/tmp/nonexistent.sock")).unwrap();
-        let key = crate::keys::encode_public_key(&crate::keys::generate().public);
+        let key = ghostport_core::keys::encode_public_key(&ghostport_core::keys::generate().public);
         app.config.peers.push(PeerConfig {
             name: "old-name".to_string(),
             public_key: key,
@@ -1294,7 +1298,8 @@ mod tests {
             .contains("not a valid"));
         assert!(app.config.peers.is_empty());
 
-        let real_key = crate::keys::encode_public_key(&crate::keys::generate().public);
+        let real_key =
+            ghostport_core::keys::encode_public_key(&ghostport_core::keys::generate().public);
         app.input_buffer = real_key.clone();
         app.confirm_peer_public_key();
         assert_eq!(app.mode, Mode::AddPeerLinks);
@@ -1311,12 +1316,16 @@ mod tests {
         let mut app = App::new(path.clone(), PathBuf::from("/tmp/nonexistent.sock")).unwrap();
         app.config.peers.push(PeerConfig {
             name: "a".to_string(),
-            public_key: crate::keys::encode_public_key(&crate::keys::generate().public),
+            public_key: ghostport_core::keys::encode_public_key(
+                &ghostport_core::keys::generate().public,
+            ),
             links: vec![],
         });
         app.config.peers.push(PeerConfig {
             name: "b".to_string(),
-            public_key: crate::keys::encode_public_key(&crate::keys::generate().public),
+            public_key: ghostport_core::keys::encode_public_key(
+                &ghostport_core::keys::generate().public,
+            ),
             links: vec![],
         });
         app.peers_selected = 0;
@@ -1370,7 +1379,8 @@ mod tests {
         app.begin_add_peer();
         app.input_buffer = "alice".to_string();
         app.confirm_peer_name();
-        app.input_buffer = crate::keys::encode_public_key(&crate::keys::generate().public);
+        app.input_buffer =
+            ghostport_core::keys::encode_public_key(&ghostport_core::keys::generate().public);
         app.confirm_peer_public_key();
         assert_eq!(app.mode, Mode::AddPeerLinks);
 

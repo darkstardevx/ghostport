@@ -4,7 +4,7 @@
 //! by hand every time. "Custom" (typing everything yourself) is always
 //! available too — these are conveniences, not the only path.
 
-use crate::config::LinkMode;
+use ghostport_core::config::LinkMode;
 
 pub struct LinkTemplate {
     pub name: &'static str,

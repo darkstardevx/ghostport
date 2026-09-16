@@ -1,9 +1,9 @@
 //! Forward-link round trip across two *real* Linux network namespaces,
 //! connected by a real veth pair (via `gateflow`), instead of one
-//! process talking to itself over loopback like `main.rs`'s
-//! `integration_tests` module does.
+//! process talking to itself over loopback like `daemon_roundtrip.rs`
+//! does.
 //!
-//! Same "nothing mocked" philosophy that module is already built on —
+//! Same "nothing mocked" philosophy that file is already built on —
 //! this just closes the one thing it can't reach: the control/data
 //! channels crossing a real network boundary, not two tasks in the same
 //! process sharing one loopback. `server::run`/`client::run` themselves
@@ -23,9 +23,9 @@ use gateflow::Sandbox;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 
-use crate::config::{Config, LinkConfig, LinkMode, Role};
-use crate::stats::SharedState;
-use crate::{client, keys, server};
+use ghostport_core::config::{Config, LinkConfig, LinkMode, Role};
+use ghostport_core::stats::SharedState;
+use ghostport_core::{client, keys, server};
 
 const CONTROL_PORT: u16 = 17800;
 const DATA_PORT: u16 = 17801;
@@ -54,8 +54,8 @@ fn scratch_socket_path(role: &str) -> PathBuf {
     ))
 }
 
-fn gateflow_peer(public_key: Vec<u8>) -> crate::peermatch::ResolvedPeer {
-    crate::peermatch::ResolvedPeer {
+fn gateflow_peer(public_key: Vec<u8>) -> ghostport_core::peermatch::ResolvedPeer {
+    ghostport_core::peermatch::ResolvedPeer {
         name: "client".to_string(),
         public_key,
         links: ["fwd", "rev"].map(String::from).into(),
@@ -101,7 +101,7 @@ fn forward_link_round_trips_across_real_network_namespaces() {
                         role: Role::Server,
                         private_key_path: PathBuf::new(),
                         peer_public_key: None,
-                        peers: vec![crate::config::PeerConfig {
+                        peers: vec![ghostport_core::config::PeerConfig {
                             name: "client".to_string(),
                             public_key: keys::encode_public_key(&client_pub),
                             links: vec!["fwd".to_string()],
@@ -269,7 +269,7 @@ fn reverse_link_round_trips_across_real_network_namespaces() {
                         role: Role::Server,
                         private_key_path: PathBuf::new(),
                         peer_public_key: None,
-                        peers: vec![crate::config::PeerConfig {
+                        peers: vec![ghostport_core::config::PeerConfig {
                             name: "client".to_string(),
                             public_key: keys::encode_public_key(&client_pub),
                             links: vec!["rev".to_string()],

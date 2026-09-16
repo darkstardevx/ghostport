@@ -1,0 +1,37 @@
+[package]
+name = "ghostport-core"
+version = "0.1.0"
+edition = "2021"
+description = "The forwarding engine behind ghostport -- Noise-authenticated peer matching, the control/data channel protocol, and the relay itself, with no CLI/TUI dependencies. A future plugin crate (e.g. ghostport-wireguard) depends on this, not on the ghostport binary."
+license = "MIT"
+
+[dependencies]
+tokio = { version = "1.38", features = ["full"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+toml = "0.8"
+snow = "0.9"
+snowstorm = "0.4"
+rand = "0.8"
+base64 = "0.22"
+sha2 = "0.10"
+# theme.rs's small ANSI color helpers, shared by the daemon's own
+# connection-lifecycle logging (server.rs/client.rs/relay.rs) and the
+# ghostport binary's CLI command output -- moved here from the binary
+# once cross-referencing revealed the daemon roles themselves (not
+# just CLI presentation) depend on it.
+cybercore = "0.4"
+
+[dev-dependencies]
+# gateflow isn't published to crates.io yet, so this pins a real commit
+# via git -- needed so a fresh clone (CI included) can actually resolve
+# it. Locally, the workspace root's .cargo/config.toml (gitignored,
+# path relative to the workspace root, unaffected by this crate's own
+# location) patches this back to the on-disk checkout at
+# ../../../Devspace/rust/gateflow, so day-to-day co-development (edit
+# gateflow, immediately retest via ghostport-core's tests) still works
+# exactly as before -- invisible to CI, which has no such file.
+# Used by tests/namespace_tests.rs to run forward/reverse link tests
+# across two real Linux network namespaces instead of one process on
+# loopback.
+gateflow = { git = "https://github.com/darkstardevx/gateflow", rev = "6c07ae9f945921418c31bbc3a3ae70e695d972db" }

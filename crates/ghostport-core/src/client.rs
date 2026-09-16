@@ -21,10 +21,17 @@ use tokio::net::{TcpListener, TcpStream};
 /// indefinitely.
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
 
+/// Everything one running client instance needs, shared (via `Arc`)
+/// across its listener/control tasks.
 pub struct Context {
+    /// The loaded, validated config for this instance.
     pub config: Arc<Config>,
+    /// This instance's own static Noise private key.
     pub private_key: Arc<Vec<u8>>,
+    /// The single pinned peer's static Noise public key.
     pub peer_public_key: Arc<Vec<u8>>,
+    /// Live link/control-connection counters, shared with the status
+    /// IPC socket.
     pub state: Arc<SharedState>,
     /// Where this instance's status IPC socket lives. Not always the
     /// default — running both roles on one machine (e.g. a local demo)
@@ -33,6 +40,9 @@ pub struct Context {
     pub socket_path: PathBuf,
 }
 
+/// Runs the client role: starts the status IPC server, a forward-mode
+/// listener for each configured forward link, and the persistent
+/// control-channel reconnect loop. Runs until the process exits.
 pub async fn run(ctx: Context) -> std::io::Result<()> {
     let ctx = Arc::new(ctx);
 

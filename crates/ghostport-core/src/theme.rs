@@ -4,6 +4,7 @@
 //! values, not ANSI escape strings; both read the same underlying
 //! `cybercore` palette.
 
+/// Wraps `s` in the palette's success color (acid green).
 pub fn ok(s: &str) -> String {
     format!(
         "{}{s}{}",
@@ -12,6 +13,7 @@ pub fn ok(s: &str) -> String {
     )
 }
 
+/// Wraps `s` in the palette's warning color (orange).
 pub fn warn(s: &str) -> String {
     format!(
         "{}{s}{}",
@@ -20,6 +22,7 @@ pub fn warn(s: &str) -> String {
     )
 }
 
+/// Wraps `s` in the palette's error color (red).
 pub fn err(s: &str) -> String {
     format!(
         "{}{s}{}",
@@ -28,6 +31,7 @@ pub fn err(s: &str) -> String {
     )
 }
 
+/// Wraps `s` in the palette's accent color (cyan) — used for link IDs.
 pub fn accent(s: &str) -> String {
     format!(
         "{}{s}{}",
@@ -36,6 +40,8 @@ pub fn accent(s: &str) -> String {
     )
 }
 
+/// Wraps `s` in bold acid green, for text that needs to stand out more
+/// than a plain [`ok`].
 pub fn emphasis(s: &str) -> String {
     format!(
         "{}{}{s}{}",

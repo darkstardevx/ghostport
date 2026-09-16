@@ -37,8 +37,12 @@ const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
 /// answers (e.g. it's offline).
 type PendingStreams = Arc<Mutex<HashMap<u64, TcpStream>>>;
 
+/// Everything one running server instance needs, shared (via `Arc`)
+/// across its listener/accept tasks.
 pub struct Context {
+    /// The loaded, validated config for this instance.
     pub config: Arc<Config>,
+    /// This instance's own static Noise private key.
     pub private_key: Arc<Vec<u8>>,
     /// Every client identity this server accepts. `Noise_KK` needs the
     /// correct remote static key loaded before a handshake message can
@@ -47,6 +51,8 @@ pub struct Context {
     /// `peermatch::match_peer`) rather than learning the identity
     /// mid-handshake the way `IK`/`XX` would.
     pub peers: Arc<Vec<ResolvedPeer>>,
+    /// Live link/control-connection counters, shared with the status
+    /// IPC socket.
     pub state: Arc<SharedState>,
     /// Where this instance's status IPC socket lives. Not always the
     /// default — running both roles on one machine (e.g. a local demo)
@@ -55,6 +61,9 @@ pub struct Context {
     pub socket_path: PathBuf,
 }
 
+/// Runs the server role: a reverse-mode listener for each configured
+/// reverse link, the status IPC server, and the control/data accept
+/// loops. Runs until the process exits.
 pub async fn run(ctx: Context) -> std::io::Result<()> {
     let listen_control = ctx
         .config

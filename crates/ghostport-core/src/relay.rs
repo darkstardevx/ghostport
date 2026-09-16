@@ -9,6 +9,9 @@ use crate::theme;
 use std::sync::atomic::Ordering::Relaxed;
 use tokio::io::{AsyncRead, AsyncWrite};
 
+/// Copies bytes both directions between `a` and `b` until either side
+/// closes, updating `stats` as it goes. Logs the closure (via
+/// [`theme`]) once the relay ends.
 pub async fn relay<A, B>(link_id: &str, stats: &LinkStats, mut a: A, mut b: B)
 where
     A: AsyncRead + AsyncWrite + Unpin,

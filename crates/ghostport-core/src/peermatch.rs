@@ -21,15 +21,26 @@ use crate::noise;
 use std::collections::HashSet;
 use tokio::io::{AsyncRead, AsyncReadExt};
 
+/// One allowed peer, resolved from config into the form `match_peer`
+/// needs: the raw public key to try, and which link IDs this peer is
+/// permitted to use.
 pub struct ResolvedPeer {
+    /// The peer's name, as given in config — for logging only.
     pub name: String,
+    /// The peer's raw 32-byte static Noise public key.
     pub public_key: Vec<u8>,
+    /// Link IDs this peer is allowed to open a data-channel stream on.
     pub links: HashSet<String>,
 }
 
+/// Why [`match_peer`] failed.
 #[derive(Debug)]
 pub enum MatchError {
+    /// The underlying TCP read failed before a full handshake message
+    /// could even be assembled.
     Io(std::io::Error),
+    /// A complete handshake message was read, but no configured peer's
+    /// key produced a valid `read_message` result for it.
     NoMatch,
 }
 

@@ -1,3 +1,6 @@
+[workspace]
+members = ["crates/ghostport-core"]
+
 [package]
 name = "ghostport"
 version = "0.1.0"
@@ -6,30 +9,20 @@ description = "Encrypted, NAT-traversing port forwarder (Noise protocol) between
 license = "MIT"
 
 [dependencies]
+# The actual forwarding engine -- config schema, Noise handshake/peer
+# matching, the relay, the daemon roles. This crate (the binary) is
+# CLI/TUI glue over it: arg parsing, presentation, systemd helpers.
+# See crates/ghostport-core for why it's a separate crate.
+ghostport-core = { path = "crates/ghostport-core" }
 tokio = { version = "1.38", features = ["full"] }
 clap = { version = "4.5", features = ["derive"] }
-serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-toml = "0.8"
-snow = "0.9"
-snowstorm = "0.4"
-rand = "0.8"
-base64 = "0.22"
-# Already resolved transitively via snow -- not a new crate in the
-# dependency tree, just made a direct dependency so keys::fingerprint
-# can use it without reaching through another crate's internals.
-sha2 = "0.10"
 cybercore = "0.4"
 ratatui = "0.30.2"
 crossterm = "0.29.0"
 
 [dev-dependencies]
-# gateflow isn't published to crates.io yet, so this pins a real commit
-# via git -- needed so a fresh clone (CI included) can actually resolve
-# it. Locally, .cargo/config.toml (gitignored) patches this back to the
-# on-disk checkout at ../../../Devspace/rust/gateflow, so day-to-day
-# co-development (edit gateflow, immediately retest via ghostport) still
-# works exactly as before -- invisible to CI, which has no such file.
-# Used by src/tests_gateflow.rs to run forward/reverse link tests across
-# two real Linux network namespaces instead of one process on loopback.
-gateflow = { git = "https://github.com/darkstardevx/gateflow", rev = "6c07ae9f945921418c31bbc3a3ae70e695d972db" }
+# Used by tui::app's own tests, which write scratch TOML config
+# fixtures directly (not through ghostport_core::config::Config::save,
+# to keep the fixtures minimal/explicit).
+toml = "0.8"
