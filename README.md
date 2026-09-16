@@ -116,8 +116,21 @@ the peer's file to cross-check the other half of a link.
 
 A unit template is at `systemd/ghostport.service` (`Restart=on-failure`,
 matching WraithFlow/VortexWall's convention). Not installed by default —
-copy it to `/etc/systemd/system/`, adjust the config path, then
+copy it to `/etc/systemd/system/`. Its `User`/`Group`/`WorkingDirectory`/
+`ExecStart` paths are hardcoded to this repo's own dev machine, not
+templated — edit them for your own user/paths before installing, then
 `sudo systemctl enable --now ghostport`.
+
+Sandboxed (`NoNewPrivileges`, `ProtectSystem=strict`,
+`ProtectHome=read-only` + a narrow `ReadWritePaths` for the one
+directory it actually writes to, an empty `CapabilityBoundingSet`,
+`RestrictAddressFamilies`, and the standard
+`MemoryDenyWriteExecute`/`LockPersonality`/`ProtectKernel*` block) —
+`systemd-analyze security ghostport.service` scores 4.8 ("OK") on this
+unit. If you adjust the paths above, double-check `ReadWritePaths` too:
+it's hardcoded (not `%h`-based) after finding that `%h` resolved to the
+wrong home directory in real testing despite `User=` being set — see
+the comment in the unit file.
 
 ## 📊 Status IPC
 
