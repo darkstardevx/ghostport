@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# Runs the fast gates (fmt/check/clippy/strict-rustdoc) before every
+# commit -- not the full suite (tests, cargo deny), which is slow
+# enough to save for CI and ./scripts/release-gates full before a push.
+#
+# Only active once you've run, one time per clone:
+#   git config core.hooksPath .githooks
+
+exec ./scripts/release-gates quick

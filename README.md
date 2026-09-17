@@ -269,6 +269,13 @@ check`. Run the same gates locally before pushing:
 ./scripts/release-gates full    # + tests + cargo-deny
 ```
 
+One-time setup to run `release-gates quick` automatically before every
+commit:
+
+```bash
+git config core.hooksPath .githooks
+```
+
 120 tests across the workspace (`ghostport-core` + all three plugin
 crates). `ghostport-core`'s own suite: per-module unit tests for config
 validation (every (role, mode)
