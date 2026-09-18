@@ -1,0 +1,16 @@
+GhostPort — Friendly Dark Palette
+
+Void        #06080D
+Ink         #0B1017
+Slate       #141B24
+Line        #263241
+Mist        #F4F7FB
+Ghost       #DCE9EF
+Cyan        #76E4F2
+Violet      #9B8CFF
+Magenta     #D98BFF
+Soft text   #91A6B8
+
+Typography direction:
+  Display/name: Avenir Next / Inter / Segoe UI style sans
+  Technical PORT/labels: IBM Plex Mono / SFMono / Menlo / monospace

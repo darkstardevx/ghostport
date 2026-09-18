@@ -3,7 +3,7 @@ members = ["crates/ghostport-core", "crates/ghostport-udp", "crates/ghostport-me
 
 [package]
 name = "ghostport"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 description = "Encrypted, NAT-traversing port forwarder (Noise protocol) between a single pinned peer pair"
 license = "MIT"

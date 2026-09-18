@@ -1,12 +1,26 @@
-# 👻 GhostPort
+<p align="center">
+  <img src="assets/ghostport-brand/ghostport-hero.svg" alt="GhostPort — encrypted tunnels that travel lightly" width="820">
+</p>
 
 [![CI](https://github.com/darkstardevx/ghostport/actions/workflows/ci.yml/badge.svg)](https://github.com/darkstardevx/ghostport/actions/workflows/ci.yml)
+[![Release](https://github.com/darkstardevx/ghostport/actions/workflows/release.yml/badge.svg)](https://github.com/darkstardevx/ghostport/actions/workflows/release.yml)
 
 `Rust` · `Noise Protocol` · `tokio`
 
 **Encrypted, NAT-traversing port forwarder.** Like `ssh -L`/`ssh -R`, but
 standalone — no SSH server needed on either end, just two GhostPort
 daemons and a pinned keypair.
+
+## 📦 Install
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/darkstardevx/ghostport/main/install.sh | sh
+```
+
+Downloads the latest release for your platform (Linux or macOS,
+x86_64 or aarch64), verifies its SHA-256 checksum, and installs
+`ghostport` to `~/.local/bin`. See the [site](https://darkstardevx.github.io/ghostport/)
+for a live install widget, or build from source with `cargo build --release`.
 
 ## 🎯 What it solves
 
