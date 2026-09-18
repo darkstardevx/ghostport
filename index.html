@@ -1,0 +1,534 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GhostPort — Encrypted tunnels that travel lightly</title>
+<meta name="description" content="Encrypted, NAT-traversing port forwarder. Like ssh -L / ssh -R, but standalone.">
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA1MTIgNTEyIj4KICA8ZGVmcz4KICAgIDxyYWRpYWxHcmFkaWVudCBpZD0iYmciIGN4PSI1MCUiIGN5PSI0MiUiIHI9IjcwJSI+CiAgICAgIDxzdG9wIG9mZnNldD0iMCIgc3RvcC1jb2xvcj0iIzE0MUIyNCIvPgogICAgICA8c3RvcCBvZmZzZXQ9IjEiIHN0b3AtY29sb3I9IiMwNjA4MEQiLz4KICAgIDwvcmFkaWFsR3JhZGllbnQ+CiAgICA8bGluZWFyR3JhZGllbnQgaWQ9InJpbmciIHgxPSIwIiB4Mj0iMSI+CiAgICAgIDxzdG9wIHN0b3AtY29sb3I9IiM3NkU0RjIiLz4KICAgICAgPHN0b3Agb2Zmc2V0PSIxIiBzdG9wLWNvbG9yPSIjOUI4Q0ZGIi8+CiAgICA8L2xpbmVhckdyYWRpZW50PgogICAgPGxpbmVhckdyYWRpZW50IGlkPSJnaG9zdEZpbGwiIHgxPSIwIiB5MT0iMCIgeDI9IjAiIHkyPSIxIj4KICAgICAgPHN0b3Agc3RvcC1jb2xvcj0iI0Y0RjdGQiIvPgogICAgICA8c3RvcCBvZmZzZXQ9IjEiIHN0b3AtY29sb3I9IiNEQ0U5RUYiLz4KICAgIDwvbGluZWFyR3JhZGllbnQ+CiAgPC9kZWZzPgogIDxyZWN0IHdpZHRoPSI1MTIiIGhlaWdodD0iNTEyIiByeD0iMTEyIiBmaWxsPSJ1cmwoI2JnKSIvPgogIDxjaXJjbGUgY3g9IjI1NiIgY3k9IjI1OCIgcj0iMTU0IiBmaWxsPSJub25lIiBzdHJva2U9IiMyNjMyNDEiIHN0cm9rZS13aWR0aD0iMiIvPgogIDxjaXJjbGUgY3g9IjI1NiIgY3k9IjI1OCIgcj0iMTI4IiBmaWxsPSJub25lIiBzdHJva2U9InVybCgjcmluZykiIHN0cm9rZS13aWR0aD0iMTAiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIKICAgICAgICAgIHN0cm9rZS1kYXNoYXJyYXk9IjU1MCA5MiIgdHJhbnNmb3JtPSJyb3RhdGUoLTI4IDI1NiAyNTgpIi8+CiAgPHBhdGggZD0iTTI1NiAxNDIKICAgICAgICAgICBDMTg4IDE0MiAxNTggMTk0IDE1OCAyNTIKICAgICAgICAgICBWMzQwCiAgICAgICAgICAgQzE1OCAzNTYgMTc3IDM2NiAxOTAgMzU2CiAgICAgICAgICAgTDIxNCAzMzggTDIzOCAzNTggTDI2MiAzMzggTDI4NiAzNTggTDMxMCAzMzggTDMzNCAzNTYKICAgICAgICAgICBDMzQ3IDM2NiAzNTQgMzU0IDM1NCAzMzkKICAgICAgICAgICBWMjUyCiAgICAgICAgICAgQzM1NCAxOTQgMzI0IDE0MiAyNTYgMTQyWiIKICAgICAgICBmaWxsPSJ1cmwoI2dob3N0RmlsbCkiLz4KICA8ZWxsaXBzZSBjeD0iMjIxIiBjeT0iMjQ3IiByeD0iMTUiIHJ5PSIyMiIgZmlsbD0iIzBCMTAxNyIvPgogIDxlbGxpcHNlIGN4PSIyOTEiIGN5PSIyNDciIHJ4PSIxNSIgcnk9IjIyIiBmaWxsPSIjMEIxMDE3Ii8+CiAgPGNpcmNsZSBjeD0iMjI2IiBjeT0iMjQxIiByPSI0IiBmaWxsPSIjNzZFNEYyIi8+CiAgPGNpcmNsZSBjeD0iMjk2IiBjeT0iMjQxIiByPSI0IiBmaWxsPSIjNzZFNEYyIi8+CiAgPHBhdGggZD0iTTIzOCAyODYgUTI1NiAzMDAgMjc0IDI4NiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMEIxMDE3IiBzdHJva2Utd2lkdGg9IjgiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIvPgogIDxjaXJjbGUgY3g9IjExNyIgY3k9IjI1OCIgcj0iOCIgZmlsbD0iIzc2RTRGMiIvPgogIDxjaXJjbGUgY3g9IjM5NSIgY3k9IjI1OCIgcj0iOCIgZmlsbD0iIzlCOENGRiIvPgogIDxwYXRoIGQ9Ik0xMjYgMjU4SDE1OE0zNTQgMjU4SDM4NiIgc3Ryb2tlPSIjOTFBNkI4IiBzdHJva2Utd2lkdGg9IjQiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIvPgo8L3N2Zz4K">
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Quicksand:wght@500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
+
+  :root {
+    --void: #06080d;
+    --panel: 11, 16, 23;
+    --panel2: 20, 27, 36;
+    --line: #263241;
+    --line-strong: #35485c;
+    --cyan: #76e4f2;
+    --lavender: #9b8cff;
+    --muted: #91a6b8;
+    --white: #f4f7fb;
+    --ghost: #dce9ef;
+    --radius: 16px;
+    --radius-sm: 7px;
+    color-scheme: dark;
+  }
+
+  * { box-sizing: border-box; }
+  ::selection { background: rgba(118,228,242,.25); color: var(--white); }
+
+  body {
+    margin: 0;
+    background: var(--void);
+    background-image:
+      radial-gradient(560px 420px at 88% -6%, rgba(118,228,242,.10), transparent 60%),
+      radial-gradient(520px 380px at 8% 18%, rgba(155,140,255,.08), transparent 60%);
+    background-attachment: fixed;
+    color: var(--ghost);
+    font-family: 'Quicksand', 'Segoe UI', sans-serif;
+    font-weight: 500;
+    font-size: 16px;
+    line-height: 1.55;
+    letter-spacing: -0.005em;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  img { max-width: 100%; }
+  a { color: inherit; }
+
+  .wrap {
+    max-width: 1080px;
+    margin: 0 auto;
+    padding-inline: 24px;
+  }
+
+  h1, h2, h3 { font-family: 'Quicksand', sans-serif; color: var(--white); margin: 0; text-wrap: balance; }
+  h1 { font-weight: 700; letter-spacing: -0.03em; }
+  h2 { font-weight: 700; letter-spacing: -0.02em; }
+  h3 { font-weight: 600; letter-spacing: -0.01em; }
+  p { margin: 0; }
+  code, .mono { font-family: 'JetBrains Mono', ui-monospace, monospace; }
+
+  /* ---------- nav ---------- */
+  nav {
+    position: sticky; top: 0; z-index: 40;
+    backdrop-filter: blur(14px) saturate(140%);
+    background: rgba(6,8,13,.72);
+    border-bottom: 1px solid var(--line);
+  }
+  nav .wrap { display: flex; align-items: center; justify-content: space-between; height: 64px; }
+  .brand { display: flex; align-items: center; gap: 10px; text-decoration: none; }
+  .brand img { width: 30px; height: 30px; border-radius: 8px; }
+  .brand span { font-weight: 700; color: var(--white); font-size: 17px; letter-spacing: -0.01em; }
+  .brand span b { color: var(--cyan); font-weight: 700; }
+  .navlinks { display: flex; align-items: center; gap: 22px; }
+  .navlinks a.navlink { font-size: 14px; color: var(--muted); text-decoration: none; font-weight: 600; }
+  .navlinks a.navlink:hover { color: var(--ghost); }
+
+  /* ---------- buttons ---------- */
+  .btn {
+    display: inline-flex; align-items: center; gap: 8px;
+    padding: 10px 18px;
+    border-radius: var(--radius-sm);
+    font-family: 'Quicksand', sans-serif; font-weight: 700; font-size: 14.5px;
+    text-decoration: none; cursor: pointer;
+    border: 1px solid transparent;
+    transition: transform .12s ease, border-color .12s ease, background .12s ease;
+  }
+  .btn:active { transform: translateY(1px); }
+  .btn-primary {
+    background: rgba(118,228,242,.14);
+    border-color: rgba(118,228,242,.55);
+    color: var(--white);
+    box-shadow: 0 0 0 1px rgba(118,228,242,.06) inset, 0 8px 24px -12px rgba(118,228,242,.35);
+  }
+  .btn-primary:hover { background: rgba(118,228,242,.22); border-color: var(--cyan); }
+  .btn-ghost {
+    background: rgba(255,255,255,.03);
+    border-color: var(--line);
+    color: var(--ghost);
+  }
+  .btn-ghost:hover { border-color: var(--line-strong); background: rgba(255,255,255,.055); }
+
+  /* ---------- pills / tags (square, not stadium) ---------- */
+  .pill {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 5px 11px;
+    border-radius: var(--radius-sm);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11.5px; font-weight: 500;
+    letter-spacing: .06em; text-transform: uppercase;
+    background: rgba(118,228,242,.07);
+    border: 1px solid rgba(118,228,242,.28);
+    color: var(--cyan);
+    white-space: nowrap;
+  }
+  .pill.violet { background: rgba(155,140,255,.08); border-color: rgba(155,140,255,.3); color: var(--lavender); }
+  .pill.mute { background: rgba(145,166,184,.06); border-color: var(--line); color: var(--muted); }
+  .pill-row { display: flex; flex-wrap: wrap; gap: 8px; }
+
+  /* ---------- ghost window chrome (replaces terminal-dot windows) ---------- */
+  .gwin {
+    border-radius: var(--radius);
+    border: 1px solid var(--line);
+    background: linear-gradient(180deg, rgba(var(--panel2),.62), rgba(var(--panel),.58));
+    backdrop-filter: blur(10px);
+    box-shadow: 0 24px 60px -34px rgba(0,0,0,.75), 0 0 0 1px rgba(255,255,255,.015) inset;
+    overflow: hidden;
+  }
+  .gwin-bar {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--line);
+    background: rgba(0,0,0,.16);
+  }
+  .gwin-id { display: flex; align-items: center; gap: 9px; min-width: 0; }
+  .gwin-mark { width: 16px; height: 16px; flex-shrink: 0; opacity: .95; }
+  .gwin-label {
+    font-family: 'JetBrains Mono', monospace; font-size: 11.5px; font-weight: 500;
+    letter-spacing: .05em; color: var(--muted);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .gwin-live {
+    display: flex; align-items: center; gap: 6px; flex-shrink: 0;
+    font-family: 'JetBrains Mono', monospace; font-size: 10px; font-weight: 500;
+    letter-spacing: .08em; text-transform: uppercase; color: var(--muted);
+  }
+  .gwin-dot { width: 7px; height: 7px; border-radius: 2px; background: var(--cyan); box-shadow: 0 0 8px 1px rgba(118,228,242,.7); }
+  .gwin-body { padding: 18px 20px; }
+  .gwin-body pre {
+    margin: 0; font-family: 'JetBrains Mono', monospace; font-size: 12.6px; line-height: 1.75;
+    color: var(--ghost); white-space: pre; overflow-x: auto;
+  }
+  .gwin .tok-muted { color: var(--muted); }
+  .gwin .tok-cyan { color: var(--cyan); }
+  .gwin .tok-violet { color: var(--lavender); }
+  .gwin .tok-white { color: var(--white); font-weight: 600; }
+  .gwin .tok-dim { color: #4c5c6e; }
+
+  /* ---------- hero ---------- */
+  .hero { padding: 76px 0 64px; }
+  .hero-grid { display: grid; grid-template-columns: 1.08fr .92fr; gap: 52px; align-items: center; }
+  .eyebrow { margin-bottom: 18px; }
+  .hero h1 { font-size: 50px; line-height: 1.08; margin-bottom: 18px; }
+  .hero h1 i { font-style: normal; color: var(--cyan); }
+  .hero-sub { font-size: 17px; color: var(--muted); max-width: 46ch; margin-bottom: 26px; line-height: 1.6; }
+  .hero-ctas { display: flex; gap: 12px; margin-bottom: 30px; flex-wrap: wrap; }
+
+  /* ---------- sections ---------- */
+  section.feature { padding: 54px 0; border-top: 1px solid var(--line); }
+  .feature-grid { display: grid; grid-template-columns: .86fr 1.14fr; gap: 52px; align-items: center; }
+  .feature-grid.rev { grid-template-columns: 1.14fr .86fr; }
+  .feature-grid.rev .feature-copy { order: 2; }
+  .feature-grid.rev .feature-visual { order: 1; }
+  .feature-kicker {
+    font-family: 'JetBrains Mono', monospace; font-size: 11.5px; font-weight: 500;
+    letter-spacing: .1em; text-transform: uppercase; color: var(--lavender); margin-bottom: 10px;
+  }
+  .feature-copy h2 { font-size: 27px; margin-bottom: 13px; }
+  .feature-copy p { color: var(--muted); font-size: 15.2px; margin-bottom: 10px; }
+  .feature-copy p:last-child { margin-bottom: 0; }
+  .feature-copy strong { color: var(--ghost); font-weight: 700; }
+
+  /* diagram (control connection) */
+  .diagram { display: flex; align-items: center; justify-content: space-between; padding: 10px 6px 4px; }
+  .diagram .node { text-align: center; }
+  .diagram .dot { width: 34px; height: 34px; border-radius: 9px; margin: 0 auto 8px; box-shadow: 0 0 0 5px rgba(255,255,255,.02); }
+  .diagram .dot.c { background: var(--cyan); box-shadow: 0 0 20px -2px rgba(118,228,242,.65); }
+  .diagram .dot.s { background: var(--lavender); box-shadow: 0 0 20px -2px rgba(155,140,255,.55); }
+  .diagram .lbl { font-family:'JetBrains Mono',monospace; font-size: 11px; color: var(--muted); letter-spacing: .04em; }
+  .diagram .line { flex: 1; height: 1px; margin: 0 14px 26px; position: relative; background: repeating-linear-gradient(90deg, var(--line-strong) 0 6px, transparent 6px 12px); }
+  .diagram .line .tag { position: absolute; top: -22px; left: 50%; transform: translateX(-50%); }
+
+  /* systemd pill grid */
+  .flag-grid { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; }
+
+  /* ---------- install ---------- */
+  .install { padding: 68px 0 60px; border-top: 1px solid var(--line); }
+  .install-head { text-align: center; max-width: 560px; margin: 0 auto 30px; }
+  .install-head h2 { font-size: 30px; margin-bottom: 10px; }
+  .install-head p { color: var(--muted); font-size: 15px; }
+  .install-card { max-width: 640px; margin: 0 auto; }
+  .os-tabs { display: flex; gap: 6px; padding: 12px 14px 0; }
+  .os-tab {
+    padding: 7px 14px; border-radius: var(--radius-sm);
+    font-family: 'JetBrains Mono', monospace; font-size: 12px; font-weight: 500;
+    letter-spacing: .04em; color: var(--muted); background: transparent; border: 1px solid transparent;
+    cursor: pointer;
+  }
+  .os-tab.active { background: rgba(118,228,242,.1); border-color: rgba(118,228,242,.35); color: var(--white); }
+  .cmd-row {
+    display: flex; align-items: center; gap: 10px;
+    margin: 14px 18px 18px; padding: 12px 8px 12px 16px;
+    background: rgba(0,0,0,.28); border: 1px solid var(--line); border-radius: var(--radius-sm);
+  }
+  .cmd-row .prompt { color: var(--cyan); font-family: 'JetBrains Mono', monospace; font-size: 13px; flex-shrink: 0; }
+  .cmd-row code { flex: 1; font-size: 13px; color: var(--ghost); overflow-x: auto; white-space: nowrap; }
+  .copy-btn {
+    flex-shrink: 0; width: 32px; height: 32px; border-radius: var(--radius-sm);
+    border: 1px solid var(--line); background: rgba(255,255,255,.03); color: var(--muted);
+    display: flex; align-items: center; justify-content: center; cursor: pointer;
+  }
+  .copy-btn:hover { border-color: var(--line-strong); color: var(--ghost); }
+  .copy-btn.copied { color: var(--cyan); border-color: rgba(118,228,242,.5); }
+  .install-more { text-align: center; margin-top: 16px; }
+  .install-more a { font-size: 13px; color: var(--muted); text-decoration: none; border-bottom: 1px dotted var(--line-strong); }
+  .install-more a:hover { color: var(--cyan); border-color: var(--cyan); }
+
+  /* ---------- footer ---------- */
+  footer { border-top: 1px solid var(--line); padding: 32px 0 44px; }
+  .foot-row { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 14px; }
+  .foot-brand { display: flex; align-items: center; gap: 9px; }
+  .foot-brand img { width: 22px; height: 22px; border-radius: 6px; }
+  .foot-brand span { font-size: 13.5px; color: var(--muted); }
+  .foot-links { display: flex; gap: 18px; }
+  .foot-links a { font-size: 13px; color: var(--muted); text-decoration: none; font-weight: 600; }
+  .foot-links a:hover { color: var(--ghost); }
+  .foot-family { font-family: 'JetBrains Mono', monospace; font-size: 10.5px; letter-spacing: .07em; color: #4c5c6e; text-transform: uppercase; }
+
+  @media (max-width: 860px) {
+    .hero-grid, .feature-grid, .feature-grid.rev { grid-template-columns: 1fr; gap: 30px; }
+    .feature-grid.rev .feature-copy, .feature-grid.rev .feature-visual { order: initial; }
+    .hero h1 { font-size: 36px; }
+    .navlinks .navlink { display: none; }
+    .diagram .lbl { font-size: 9.5px; }
+  }
+</style>
+
+<nav>
+  <div class="wrap">
+    <a class="brand" href="#">
+      <img src="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA1MTIgNTEyIj4KICA8ZGVmcz4KICAgIDxyYWRpYWxHcmFkaWVudCBpZD0iYmciIGN4PSI1MCUiIGN5PSI0MiUiIHI9IjcwJSI+CiAgICAgIDxzdG9wIG9mZnNldD0iMCIgc3RvcC1jb2xvcj0iIzE0MUIyNCIvPgogICAgICA8c3RvcCBvZmZzZXQ9IjEiIHN0b3AtY29sb3I9IiMwNjA4MEQiLz4KICAgIDwvcmFkaWFsR3JhZGllbnQ+CiAgICA8bGluZWFyR3JhZGllbnQgaWQ9InJpbmciIHgxPSIwIiB4Mj0iMSI+CiAgICAgIDxzdG9wIHN0b3AtY29sb3I9IiM3NkU0RjIiLz4KICAgICAgPHN0b3Agb2Zmc2V0PSIxIiBzdG9wLWNvbG9yPSIjOUI4Q0ZGIi8+CiAgICA8L2xpbmVhckdyYWRpZW50PgogICAgPGxpbmVhckdyYWRpZW50IGlkPSJnaG9zdEZpbGwiIHgxPSIwIiB5MT0iMCIgeDI9IjAiIHkyPSIxIj4KICAgICAgPHN0b3Agc3RvcC1jb2xvcj0iI0Y0RjdGQiIvPgogICAgICA8c3RvcCBvZmZzZXQ9IjEiIHN0b3AtY29sb3I9IiNEQ0U5RUYiLz4KICAgIDwvbGluZWFyR3JhZGllbnQ+CiAgPC9kZWZzPgogIDxyZWN0IHdpZHRoPSI1MTIiIGhlaWdodD0iNTEyIiByeD0iMTEyIiBmaWxsPSJ1cmwoI2JnKSIvPgogIDxjaXJjbGUgY3g9IjI1NiIgY3k9IjI1OCIgcj0iMTU0IiBmaWxsPSJub25lIiBzdHJva2U9IiMyNjMyNDEiIHN0cm9rZS13aWR0aD0iMiIvPgogIDxjaXJjbGUgY3g9IjI1NiIgY3k9IjI1OCIgcj0iMTI4IiBmaWxsPSJub25lIiBzdHJva2U9InVybCgjcmluZykiIHN0cm9rZS13aWR0aD0iMTAiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIKICAgICAgICAgIHN0cm9rZS1kYXNoYXJyYXk9IjU1MCA5MiIgdHJhbnNmb3JtPSJyb3RhdGUoLTI4IDI1NiAyNTgpIi8+CiAgPHBhdGggZD0iTTI1NiAxNDIKICAgICAgICAgICBDMTg4IDE0MiAxNTggMTk0IDE1OCAyNTIKICAgICAgICAgICBWMzQwCiAgICAgICAgICAgQzE1OCAzNTYgMTc3IDM2NiAxOTAgMzU2CiAgICAgICAgICAgTDIxNCAzMzggTDIzOCAzNTggTDI2MiAzMzggTDI4NiAzNTggTDMxMCAzMzggTDMzNCAzNTYKICAgICAgICAgICBDMzQ3IDM2NiAzNTQgMzU0IDM1NCAzMzkKICAgICAgICAgICBWMjUyCiAgICAgICAgICAgQzM1NCAxOTQgMzI0IDE0MiAyNTYgMTQyWiIKICAgICAgICBmaWxsPSJ1cmwoI2dob3N0RmlsbCkiLz4KICA8ZWxsaXBzZSBjeD0iMjIxIiBjeT0iMjQ3IiByeD0iMTUiIHJ5PSIyMiIgZmlsbD0iIzBCMTAxNyIvPgogIDxlbGxpcHNlIGN4PSIyOTEiIGN5PSIyNDciIHJ4PSIxNSIgcnk9IjIyIiBmaWxsPSIjMEIxMDE3Ii8+CiAgPGNpcmNsZSBjeD0iMjI2IiBjeT0iMjQxIiByPSI0IiBmaWxsPSIjNzZFNEYyIi8+CiAgPGNpcmNsZSBjeD0iMjk2IiBjeT0iMjQxIiByPSI0IiBmaWxsPSIjNzZFNEYyIi8+CiAgPHBhdGggZD0iTTIzOCAyODYgUTI1NiAzMDAgMjc0IDI4NiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMEIxMDE3IiBzdHJva2Utd2lkdGg9IjgiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIvPgogIDxjaXJjbGUgY3g9IjExNyIgY3k9IjI1OCIgcj0iOCIgZmlsbD0iIzc2RTRGMiIvPgogIDxjaXJjbGUgY3g9IjM5NSIgY3k9IjI1OCIgcj0iOCIgZmlsbD0iIzlCOENGRiIvPgogIDxwYXRoIGQ9Ik0xMjYgMjU4SDE1OE0zNTQgMjU4SDM4NiIgc3Ryb2tlPSIjOTFBNkI4IiBzdHJva2Utd2lkdGg9IjQiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIvPgo8L3N2Zz4K" alt="">
+      <span>Ghost<b>Port</b></span>
+    </a>
+    <div class="navlinks">
+      <a class="navlink" href="#security">Security</a>
+      <a class="navlink" href="#tui">TUI</a>
+      <a class="navlink" href="#install">Install</a>
+      <a class="navlink btn btn-ghost" style="padding:7px 14px;font-size:13px;" href="https://github.com/darkstardevx/ghostport" target="_blank" rel="noopener">GitHub</a>
+    </div>
+  </div>
+</nav>
+
+<header class="hero">
+  <div class="wrap hero-grid">
+    <div>
+      <div class="pill-row eyebrow">
+        <span class="pill">Rust</span>
+        <span class="pill violet">Noise Protocol</span>
+        <span class="pill mute">MIT</span>
+      </div>
+      <h1>Encrypted tunnels<br>that travel <i>lightly.</i></h1>
+      <p class="hero-sub">A standalone, NAT-traversing port forwarder. Like <code class="mono">ssh -L</code> / <code class="mono">ssh -R</code>, but no SSH server on either end — just two GhostPort daemons and a pinned keypair.</p>
+      <div class="hero-ctas">
+        <a class="btn btn-primary" href="#install">Install GhostPort</a>
+        <a class="btn btn-ghost" href="https://github.com/darkstardevx/ghostport" target="_blank" rel="noopener">View source</a>
+      </div>
+      <div class="pill-row">
+        <span class="pill mute">forward</span>
+        <span class="pill mute">reverse</span>
+        <span class="pill mute">multi-peer</span>
+        <span class="pill mute">systemd-hardened</span>
+      </div>
+    </div>
+
+    <div class="gwin">
+      <div class="gwin-bar">
+        <div class="gwin-id">
+          <svg class="gwin-mark" viewBox="0 0 40 40"><path d="M20 6C11 6 6 14 6 22v10l5-4 5 4 4-4 4 4 4-4 5 4V22c0-8-5-16-13-16Z" fill="#DCE9EF"/><ellipse cx="15" cy="21" rx="2.6" ry="3.8" fill="#0B1017"/><ellipse cx="25" cy="21" rx="2.6" ry="3.8" fill="#0B1017"/></svg>
+          <span class="gwin-label">~/.config/ghostport &mdash; keygen</span>
+        </div>
+        <div class="gwin-live"><span class="gwin-dot"></span>live</div>
+      </div>
+      <div class="gwin-body">
+        <pre><span class="tok-muted">$</span> <span class="tok-white">ghostport status --watch</span>
+
+<span class="tok-cyan">role:</span> server   <span class="tok-cyan">uptime:</span> 4h 12m 03s   <span class="tok-cyan">control:</span> <span class="tok-cyan">connected</span>
+  peer: 100.87.3.14:51902  (connected 3912s ago)
+
+<span class="tok-dim">link           mode      active   total    bytes-fwd   bytes-back</span>
+homedb         <span class="tok-cyan">forward</span>        1        6      182.4 KB     641.2 KB
+laptop-dev     <span class="tok-violet">reverse</span>        1        2       94.7 KB      11.0 KB</pre>
+      </div>
+    </div>
+  </div>
+</header>
+
+<section class="feature" id="architecture">
+  <div class="wrap feature-grid">
+    <div class="feature-copy">
+      <div class="feature-kicker">Architecture</div>
+      <h2>Both directions, from<br>one binary.</h2>
+      <p><strong>Forward</strong> links reach a service near the server from a port on your machine &mdash; the normal <code class="mono">ssh -L</code> case.</p>
+      <p><strong>Reverse</strong> links expose something on your machine through the server, even though your machine can't accept inbound connections at all. No public IP, no port-forwarding on your router.</p>
+      <p>Every link is declared once on each side &mdash; <code class="mono">ghostport check</code> validates internal consistency before anything starts.</p>
+    </div>
+    <div class="gwin feature-visual">
+      <div class="gwin-bar">
+        <div class="gwin-id">
+          <svg class="gwin-mark" viewBox="0 0 40 40"><path d="M20 6C11 6 6 14 6 22v10l5-4 5 4 4-4 4 4 4-4 5 4V22c0-8-5-16-13-16Z" fill="#DCE9EF"/><ellipse cx="15" cy="21" rx="2.6" ry="3.8" fill="#0B1017"/><ellipse cx="25" cy="21" rx="2.6" ry="3.8" fill="#0B1017"/></svg>
+          <span class="gwin-label">server.toml</span>
+        </div>
+        <div class="gwin-live"><span class="gwin-dot"></span>config</div>
+      </div>
+      <div class="gwin-body">
+        <pre><span class="tok-violet">role</span> = <span class="tok-white">"server"</span>
+<span class="tok-violet">listen_control</span> = <span class="tok-white">"0.0.0.0:9000"</span>
+<span class="tok-violet">listen_data</span>    = <span class="tok-white">"0.0.0.0:9001"</span>
+
+<span class="tok-dim">[[peers]]</span>
+<span class="tok-violet">name</span> = <span class="tok-white">"laptop"</span>
+<span class="tok-violet">links</span> = [<span class="tok-white">"homedb"</span>, <span class="tok-white">"laptop-dev"</span>]
+
+<span class="tok-dim">[[links]]</span>
+<span class="tok-violet">id</span> = <span class="tok-white">"homedb"</span>      <span class="tok-muted">mode = forward</span>
+<span class="tok-violet">target</span> = <span class="tok-white">"127.0.0.1:5432"</span>
+
+<span class="tok-dim">[[links]]</span>
+<span class="tok-violet">id</span> = <span class="tok-white">"laptop-dev"</span>  <span class="tok-muted">mode = reverse</span>
+<span class="tok-violet">listen</span> = <span class="tok-white">"0.0.0.0:8080"</span></pre>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="feature" id="security">
+  <div class="wrap feature-grid rev">
+    <div class="feature-copy">
+      <div class="feature-kicker">Security</div>
+      <h2>A handshake that<br>refuses impostors.</h2>
+      <p><code class="mono">Noise_KK_25519_ChaChaPoly_BLAKE2s</code> &mdash; both peers already know each other's static public key ahead of time. Unlike <code class="mono">IK</code>/<code class="mono">XX</code>, there's no "check the identity after the fact" step: a peer without the matching private key simply <strong>cannot complete the handshake</strong>.</p>
+      <p>Every key comes with a SHA-256 fingerprint &mdash; the same verification ritual as an SSH host key &mdash; something short enough to read aloud to the peer on the other end.</p>
+    </div>
+    <div class="gwin feature-visual">
+      <div class="gwin-bar">
+        <div class="gwin-id">
+          <svg class="gwin-mark" viewBox="0 0 40 40"><path d="M20 6C11 6 6 14 6 22v10l5-4 5 4 4-4 4 4 4-4 5 4V22c0-8-5-16-13-16Z" fill="#DCE9EF"/><ellipse cx="15" cy="21" rx="2.6" ry="3.8" fill="#0B1017"/><ellipse cx="25" cy="21" rx="2.6" ry="3.8" fill="#0B1017"/></svg>
+          <span class="gwin-label">$ ghostport keygen</span>
+        </div>
+        <div class="gwin-live"><span class="gwin-dot"></span>live</div>
+      </div>
+      <div class="gwin-body">
+        <pre>Private key saved to <span class="tok-cyan">~/.config/ghostport/identity.key</span> (0600)
+Public key saved to  <span class="tok-cyan">~/.config/ghostport/identity.key.pub</span>
+
+Give this public key to the peer, for their config's
+<span class="tok-muted">peer_public_key</span>:
+  <span class="tok-white">4vQ1nR8xLKp+eZs3TgY6wA0cJhVd2Fb9...</span>
+
+Fingerprint (read this aloud / compare side-by-side
+with the peer to catch a transcription error):
+  <span class="tok-cyan">3a:9f:41:c2:7e:08:b5:d1:64:f3:2c:90:ae:17:5b:c4</span></pre>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="feature" id="nat">
+  <div class="wrap feature-grid">
+    <div class="feature-copy">
+      <div class="feature-kicker">NAT traversal</div>
+      <h2>One pinned control<br>connection.</h2>
+      <p>Reverse tunneling needs the server to trigger a new stream on demand &mdash; but it can't dial the client behind NAT. GhostPort keeps one small, auto-reconnecting <strong>control connection</strong> open (client &rarr; server) carrying only tiny <code class="mono">OpenStream</code> signals.</p>
+      <p>Every actual byte-stream still gets its own fresh, fully-encrypted tunnel &mdash; always dialed by the client, accepted by the server. The client only ever needs outbound connectivity.</p>
+    </div>
+    <div class="gwin feature-visual">
+      <div class="gwin-bar">
+        <div class="gwin-id">
+          <svg class="gwin-mark" viewBox="0 0 40 40"><path d="M20 6C11 6 6 14 6 22v10l5-4 5 4 4-4 4 4 4-4 5 4V22c0-8-5-16-13-16Z" fill="#DCE9EF"/><ellipse cx="15" cy="21" rx="2.6" ry="3.8" fill="#0B1017"/><ellipse cx="25" cy="21" rx="2.6" ry="3.8" fill="#0B1017"/></svg>
+          <span class="gwin-label">topology</span>
+        </div>
+        <div class="gwin-live"><span class="gwin-dot"></span>diagram</div>
+      </div>
+      <div class="gwin-body">
+        <div class="diagram">
+          <div class="node"><div class="dot c"></div><div class="lbl">client<br><span class="tok-dim">behind NAT</span></div></div>
+          <div class="line"><span class="pill mute tag">control</span></div>
+          <div class="node"><div class="dot s"></div><div class="lbl">server<br><span class="tok-dim">stable addr</span></div></div>
+        </div>
+        <p style="font-family:'JetBrains Mono',monospace;font-size:11.5px;color:var(--muted);text-align:center;margin-top:4px;">dialed by client &middot; accepted by server &middot; always</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="feature" id="tui">
+  <div class="wrap feature-grid rev">
+    <div class="feature-copy">
+      <div class="feature-kicker">Management</div>
+      <h2>A TUI that's actually<br>a console.</h2>
+      <p>Four tabs: live <strong>Status</strong> with per-link throughput estimates, a full link editor with <strong>templates</strong> (SSH, Postgres, Redis, dev server&hellip;), <strong>Service</strong> control (start/stop/enable/install unit), and recent <strong>Logs</strong>.</p>
+      <p>Every edit is validated before it's ever written &mdash; the same <code class="mono">Config::validate()</code> the daemon itself runs.</p>
+    </div>
+    <div class="gwin feature-visual">
+      <div class="gwin-bar">
+        <div class="gwin-id">
+          <svg class="gwin-mark" viewBox="0 0 40 40"><path d="M20 6C11 6 6 14 6 22v10l5-4 5 4 4-4 4 4 4-4 5 4V22c0-8-5-16-13-16Z" fill="#DCE9EF"/><ellipse cx="15" cy="21" rx="2.6" ry="3.8" fill="#0B1017"/><ellipse cx="25" cy="21" rx="2.6" ry="3.8" fill="#0B1017"/></svg>
+          <span class="gwin-label">ghostport tui</span>
+        </div>
+        <div class="gwin-live"><span class="gwin-dot"></span>live</div>
+      </div>
+      <div class="gwin-body">
+        <pre><span class="tok-cyan">[1] Status</span>  <span class="tok-dim">[2] Links   [3] Service   [4] Logs</span>
+
+<span class="tok-dim">name        fingerprint              links</span>
+laptop      3a:9f:41:c2:7e:08&hellip;    homedb, laptop-dev
+phone       c7:12:8e:44:9a:01&hellip;    homedb
+
+<span class="tok-dim">──────────────────────────────────────</span>
+<span class="tok-muted">r</span> refresh   <span class="tok-muted">a</span> add   <span class="tok-muted">e</span> edit   <span class="tok-muted">s</span> save</pre>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="feature" id="hardened">
+  <div class="wrap feature-grid">
+    <div class="feature-copy">
+      <div class="feature-kicker">Deployment</div>
+      <h2>Hardened by default,<br>not by luck.</h2>
+      <p>The shipped systemd unit runs sandboxed out of the box &mdash; scores <strong>4.8 &ldquo;OK&rdquo;</strong> on <code class="mono">systemd-analyze security</code>. Multi-peer support lets one server accept several independently-pinned clients, each scoped to only its own links.</p>
+      <div class="flag-grid">
+        <span class="pill">NoNewPrivileges</span>
+        <span class="pill">ProtectSystem=strict</span>
+        <span class="pill">ProtectHome=read-only</span>
+        <span class="pill">CapabilityBoundingSet=</span>
+        <span class="pill">RestrictAddressFamilies</span>
+        <span class="pill">MemoryDenyWriteExecute</span>
+      </div>
+    </div>
+    <div class="gwin feature-visual">
+      <div class="gwin-bar">
+        <div class="gwin-id">
+          <svg class="gwin-mark" viewBox="0 0 40 40"><path d="M20 6C11 6 6 14 6 22v10l5-4 5 4 4-4 4 4 4-4 5 4V22c0-8-5-16-13-16Z" fill="#DCE9EF"/><ellipse cx="15" cy="21" rx="2.6" ry="3.8" fill="#0B1017"/><ellipse cx="25" cy="21" rx="2.6" ry="3.8" fill="#0B1017"/></svg>
+          <span class="gwin-label">$ systemd-analyze security</span>
+        </div>
+        <div class="gwin-live"><span class="gwin-dot"></span>live</div>
+      </div>
+      <div class="gwin-body">
+        <pre>ghostport.service
+
+  NoNewPrivileges=                 <span class="tok-cyan">yes</span>
+  ProtectSystem=                   <span class="tok-cyan">strict</span>
+  ProtectHome=                     <span class="tok-cyan">read-only</span>
+  ProtectKernelTunables=           <span class="tok-cyan">yes</span>
+  ProtectKernelModules=            <span class="tok-cyan">yes</span>
+  RestrictAddressFamilies=         <span class="tok-cyan">yes</span>
+  MemoryDenyWriteExecute=          <span class="tok-cyan">yes</span>
+  LockPersonality=                 <span class="tok-cyan">yes</span>
+
+  &rarr; <span class="tok-white">4.8 OK</span> <span class="tok-dim">(exposure level)</span></pre>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="install" id="install">
+  <div class="wrap">
+    <div class="install-head">
+      <h2>Get GhostPort running</h2>
+      <p>One command &mdash; downloads, verifies the checksum, installs to <code class="mono">~/.local/bin</code>.</p>
+    </div>
+    <div class="gwin install-card">
+      <div class="os-tabs" role="tablist">
+        <button class="os-tab active" data-os="linux" onclick="gpSetOs('linux')">Linux</button>
+        <button class="os-tab" data-os="macos" onclick="gpSetOs('macos')">macOS</button>
+      </div>
+      <div class="cmd-row">
+        <span class="prompt">&gt;_</span>
+        <code id="gp-cmd" class="mono">curl -fsSL https://raw.githubusercontent.com/darkstardevx/ghostport/main/install.sh | sh</code>
+        <button class="copy-btn" onclick="gpCopy(this)" aria-label="Copy command">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+        </button>
+      </div>
+    </div>
+    <div class="install-more">
+      <a href="https://github.com/darkstardevx/ghostport#-commands" target="_blank" rel="noopener">More install options &amp; manual builds &rarr;</a>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap foot-row">
+    <div class="foot-brand">
+      <img src="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA1MTIgNTEyIj4KICA8ZGVmcz4KICAgIDxyYWRpYWxHcmFkaWVudCBpZD0iYmciIGN4PSI1MCUiIGN5PSI0MiUiIHI9IjcwJSI+CiAgICAgIDxzdG9wIG9mZnNldD0iMCIgc3RvcC1jb2xvcj0iIzE0MUIyNCIvPgogICAgICA8c3RvcCBvZmZzZXQ9IjEiIHN0b3AtY29sb3I9IiMwNjA4MEQiLz4KICAgIDwvcmFkaWFsR3JhZGllbnQ+CiAgICA8bGluZWFyR3JhZGllbnQgaWQ9InJpbmciIHgxPSIwIiB4Mj0iMSI+CiAgICAgIDxzdG9wIHN0b3AtY29sb3I9IiM3NkU0RjIiLz4KICAgICAgPHN0b3Agb2Zmc2V0PSIxIiBzdG9wLWNvbG9yPSIjOUI4Q0ZGIi8+CiAgICA8L2xpbmVhckdyYWRpZW50PgogICAgPGxpbmVhckdyYWRpZW50IGlkPSJnaG9zdEZpbGwiIHgxPSIwIiB5MT0iMCIgeDI9IjAiIHkyPSIxIj4KICAgICAgPHN0b3Agc3RvcC1jb2xvcj0iI0Y0RjdGQiIvPgogICAgICA8c3RvcCBvZmZzZXQ9IjEiIHN0b3AtY29sb3I9IiNEQ0U5RUYiLz4KICAgIDwvbGluZWFyR3JhZGllbnQ+CiAgPC9kZWZzPgogIDxyZWN0IHdpZHRoPSI1MTIiIGhlaWdodD0iNTEyIiByeD0iMTEyIiBmaWxsPSJ1cmwoI2JnKSIvPgogIDxjaXJjbGUgY3g9IjI1NiIgY3k9IjI1OCIgcj0iMTU0IiBmaWxsPSJub25lIiBzdHJva2U9IiMyNjMyNDEiIHN0cm9rZS13aWR0aD0iMiIvPgogIDxjaXJjbGUgY3g9IjI1NiIgY3k9IjI1OCIgcj0iMTI4IiBmaWxsPSJub25lIiBzdHJva2U9InVybCgjcmluZykiIHN0cm9rZS13aWR0aD0iMTAiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIKICAgICAgICAgIHN0cm9rZS1kYXNoYXJyYXk9IjU1MCA5MiIgdHJhbnNmb3JtPSJyb3RhdGUoLTI4IDI1NiAyNTgpIi8+CiAgPHBhdGggZD0iTTI1NiAxNDIKICAgICAgICAgICBDMTg4IDE0MiAxNTggMTk0IDE1OCAyNTIKICAgICAgICAgICBWMzQwCiAgICAgICAgICAgQzE1OCAzNTYgMTc3IDM2NiAxOTAgMzU2CiAgICAgICAgICAgTDIxNCAzMzggTDIzOCAzNTggTDI2MiAzMzggTDI4NiAzNTggTDMxMCAzMzggTDMzNCAzNTYKICAgICAgICAgICBDMzQ3IDM2NiAzNTQgMzU0IDM1NCAzMzkKICAgICAgICAgICBWMjUyCiAgICAgICAgICAgQzM1NCAxOTQgMzI0IDE0MiAyNTYgMTQyWiIKICAgICAgICBmaWxsPSJ1cmwoI2dob3N0RmlsbCkiLz4KICA8ZWxsaXBzZSBjeD0iMjIxIiBjeT0iMjQ3IiByeD0iMTUiIHJ5PSIyMiIgZmlsbD0iIzBCMTAxNyIvPgogIDxlbGxpcHNlIGN4PSIyOTEiIGN5PSIyNDciIHJ4PSIxNSIgcnk9IjIyIiBmaWxsPSIjMEIxMDE3Ii8+CiAgPGNpcmNsZSBjeD0iMjI2IiBjeT0iMjQxIiByPSI0IiBmaWxsPSIjNzZFNEYyIi8+CiAgPGNpcmNsZSBjeD0iMjk2IiBjeT0iMjQxIiByPSI0IiBmaWxsPSIjNzZFNEYyIi8+CiAgPHBhdGggZD0iTTIzOCAyODYgUTI1NiAzMDAgMjc0IDI4NiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMEIxMDE3IiBzdHJva2Utd2lkdGg9IjgiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIvPgogIDxjaXJjbGUgY3g9IjExNyIgY3k9IjI1OCIgcj0iOCIgZmlsbD0iIzc2RTRGMiIvPgogIDxjaXJjbGUgY3g9IjM5NSIgY3k9IjI1OCIgcj0iOCIgZmlsbD0iIzlCOENGRiIvPgogIDxwYXRoIGQ9Ik0xMjYgMjU4SDE1OE0zNTQgMjU4SDM4NiIgc3Ryb2tlPSIjOTFBNkI4IiBzdHJva2Utd2lkdGg9IjQiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIvPgo8L3N2Zz4K" alt="">
+      <span>GhostPort &middot; MIT licensed</span>
+    </div>
+    <div class="foot-links">
+      <a href="https://github.com/darkstardevx/ghostport" target="_blank" rel="noopener">GitHub</a>
+      <a href="https://github.com/darkstardevx/ghostport/releases" target="_blank" rel="noopener">Releases</a>
+      <a href="#install">Install</a>
+    </div>
+    <div class="foot-family">Cybercore family</div>
+  </div>
+</footer>
+
+<script>
+  const CMDS = {
+    linux: 'curl -fsSL https://raw.githubusercontent.com/darkstardevx/ghostport/main/install.sh | sh',
+    macos: 'curl -fsSL https://raw.githubusercontent.com/darkstardevx/ghostport/main/install.sh | sh'
+  };
+  function gpSetOs(os) {
+    document.querySelectorAll('.os-tab').forEach(t => t.classList.toggle('active', t.dataset.os === os));
+    document.getElementById('gp-cmd').textContent = CMDS[os];
+  }
+  function gpCopy(btn) {
+    const text = document.getElementById('gp-cmd').textContent;
+    navigator.clipboard?.writeText(text).then(() => {
+      btn.classList.add('copied');
+      setTimeout(() => btn.classList.remove('copied'), 1400);
+    }).catch(() => {});
+  }
+  try {
+    if (/Mac OS X|Macintosh/.test(navigator.userAgent)) gpSetOs('macos');
+  } catch (e) {}
+</script>
